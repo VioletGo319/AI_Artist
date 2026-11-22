@@ -81,6 +81,16 @@ hf download Tongyi-MAI/Z-Image-Turbo --local-dir weights/diffusers/Tongyi-MAI/Z-
 
 容器不能替换宿主 GPU 驱动。须取得 **A100 计算节点的实际驱动版本**，再选择 CUDA/PyTorch/vLLM 组合；VALET 中 CUDA toolkit 的版本不能代替此信息。兼容性检查也必须经 Slurm 申请，计入当日一次任务额度。不要在登录节点安装系统 glibc、启动推理或常驻轮询。[Apptainer GPU 要求](https://apptainer.org/docs/user/latest/gpu.html)
 
+已在获授权的单卡 A100 Slurm 检查中读到驱动 `550.54.15`。对此环境先准备 Z-Image-Turbo 备用环境，避免直接使用 FLUX 官方默认 CUDA 13 安装路径。下面两步在容器内的独立 `.venv-zimage` 中执行；先安装官方 CUDA 12.4 PyTorch wheel，再约束其余包。Python 3.12 中的包依赖检查和 `ZImagePipeline` 导入已通过，**真实 A100 推理与显存峰值尚待验证**。[PyTorch 官方历史版本](https://pytorch.org/get-started/previous-versions/) · [NVIDIA 驱动兼容表](https://docs.nvidia.com/deploy/cuda-compatibility/minor-version-compatibility.html)
+
+```bash
+python -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
+python -m pip install -e . -r requirements-diffusers.txt -c config/caviness-zimage-constraints.txt
+python -m pip check
+```
+
+使用此备用环境时，在私人调度器设置 `ART_BACKEND=diffusers`，并把 `HPC_GPU_PYTHON` 指向远端 `.venv-zimage/bin/python`。可以沿用已验证的 Python SIF：CUDA runtime 随 PyTorch wheel 安装，GPU 作业仍须由 `--nv` 接入宿主驱动。模型、Hugging Face 与 CUDA 编译缓存都写入项目私有目录，不依赖容器中的默认 home。
+
 每个本地日期共享一条 SQLite 调度记录，每天最多调用一次真实 `sbatch`，累计 GPU 运行时间不超过 30 分钟。默认请求一张 A100、30 分钟墙钟和约 10 分钟排队准入窗口。若接近午夜，调度器收紧窗口。等待资源失败时当日作废，并在后续状态检查中取消超期作业。抢占后不自动重新入队。私机发出短时 SSH 命令记录状态，并在作业退出后拉取已完成的候选。无需在登录节点保持轮询进程。
 
 **释放 GPU。** 正常完成、超时、抢占或异常退出时，worker 会保存已完成作品、丢弃模型引用并尽力释放本进程的 PyTorch 空闲缓存。Prompt Upsampler 使用独立进程组，父进程在所有退出路径回收该组，避免残留 vLLM 子进程。worker 退出释放 CUDA context，Slurm 负责收回作业分配；强制终止时由 Slurm 清理作业进程。不会重置 GPU、终止其他用户进程或删除权重缓存。`empty_cache()` 只释放未使用的缓存，不能替代进程退出，也不保证共享节点的总显存使用率归零。此清理路径有模拟 CUDA 与真实 CPU 子进程测试，尚未完成真实 A100 验证。

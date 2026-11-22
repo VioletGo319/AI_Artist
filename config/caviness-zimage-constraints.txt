@@ -1,0 +1,8 @@
+# CUDA 12.4 fallback: package imports validated in Python 3.12 / Apptainer.
+# Real A100 generation still requires a Slurm acceptance test.
+torch==2.6.0+cu124
+diffusers==0.39.0
+transformers==5.24.0
+accelerate==1.16.0
+huggingface-hub==1.33.0
+numpy==2.5.5

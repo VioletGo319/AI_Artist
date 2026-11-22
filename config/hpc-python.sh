@@ -50,4 +50,7 @@ if [[ "$image" != /* || ! -f "$image" || "$python" != /* ]]; then
 fi
 options+=(--env "ART_CONFIG=$curator_root/config.yaml" --env "ART_STATE_DIR=$curator_root/private")
 options+=(--env "ART_WEIGHTS_DIR=$curator_root/weights" --env HF_HUB_OFFLINE=1 --env TRANSFORMERS_OFFLINE=1)
+options+=(--env "HF_HOME=$curator_root/private/huggingface" --env "XDG_CACHE_HOME=$curator_root/work/cache")
+options+=(--env "TORCH_HOME=$curator_root/work/torch" --env "TRITON_CACHE_DIR=$curator_root/work/triton")
+options+=(--env "CUDA_CACHE_PATH=$curator_root/work/cuda-cache" --env PYTHONNOUSERSITE=1)
 exec "$HPC_APPTAINER" "${options[@]}" "$image" "$python" "$@"
