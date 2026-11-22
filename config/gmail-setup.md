@@ -49,10 +49,10 @@ GMAIL_ENABLED=true python -m artcurator send-email --latest
 Open the original gallery in Gmail, use **Reply**, and keep **xwyu@udel.edu** as the sole recipient. Leave the subject unchanged, do not forward, remove any automatic signature, and write a single command above the quoted history:
 
 ```text
-APPROVE: 01, 03
+01,03
 ```
 
-`APPROVE: ALL` selects all candidates; `SKIP` closes the batch without publishing. The first valid reply closes the decision. Reply to the original gallery message, not to a previous approval. Self-replies must carry Gmail's own `SENT` message label and matching From/To; inbound messages that merely claim the same sender cannot approve. Original gallery messages and quoted instructions are excluded. Separate sender/approver configurations remain supported using DMARC-validated incoming replies.
+One number such as `05` is enough. Multiple numbers can use English or Chinese commas/semicolons: `01,03`, `01;03`, `01，03`, or `01；03`. The `APPROVE:` prefix is optional for numbered selections. `APPROVE: ALL` selects all candidates; `SKIP` closes the batch without publishing. The first valid reply closes the decision. Reply to the original gallery message, not to a previous approval. Self-replies must carry Gmail's own `SENT` message label and matching From/To; inbound messages that merely claim the same sender cannot approve. Original gallery messages and quoted instructions are excluded. Separate sender/approver configurations remain supported using DMARC-validated incoming replies.
 
 ```bash
 GMAIL_ENABLED=true python -m artcurator check-replies

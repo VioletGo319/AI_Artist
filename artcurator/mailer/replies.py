@@ -2,7 +2,8 @@ from html.parser import HTMLParser
 import re
 
 
-APPROVE = re.compile(r"APPROVE\s*:\s*(ALL|\d{1,2}(?:\s*,\s*\d{1,2})*)", re.I)
+NUMBERS = re.compile(r"[0-9]{1,2}(?:\s*[,，;；]\s*[0-9]{1,2})*")
+APPROVE = re.compile(r"APPROVE\s*:\s*(.+)", re.I)
 QUOTED = re.compile(r"^(?:>|On .{1,400}wrote:\s*$|[-_]{2,}\s*(?:original message|forwarded message)|From:\s|--\s*$)", re.I)
 FORWARDED = re.compile(r"(?:forwarded message|begin forwarded)", re.I)
 
@@ -63,10 +64,13 @@ def parse_command(value, available):
     if value.upper() == "SKIP":
         return "skip", set()
     matched = APPROVE.fullmatch(value)
-    if not matched:
+    text = matched[1] if matched else value
+    if matched and text.upper() == "ALL":
+        picked = set(available)
+    elif NUMBERS.fullmatch(text):
+        picked = {int(number) for number in re.split(r"[,，;；]", text)}
+    else:
         return None
-    text = matched[1]
-    picked = set(available) if text.upper() == "ALL" else {int(number) for number in text.split(",")}
     return ("approve", picked) if picked and picked.issubset(available) else None
 
 

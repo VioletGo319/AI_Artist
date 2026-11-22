@@ -36,7 +36,7 @@ def gallery_message(batch, artworks, delivery, folder, sender, preview=False):
                     f'style="width:100%;max-width:360px;height:auto;display:block;border-radius:6px">'
                     f'<p style="margin:11px 0 2px"><strong>{escape(label)}</strong></p>'
                     f'<p style="margin:0;color:#b9b1ba">{escape(item["model"])}</p></td></tr>')
-    instructions = "Reply with APPROVE: 01, 03, 04, APPROVE: ALL, or SKIP."
+    instructions = "Reply with numbers such as 05, 01,03,05 or 01；03；05. English/Chinese commas and semicolons are accepted. APPROVE: ALL and SKIP also work."
     token = f'Batch ID: {batch["id"]} · {delivery["token"]}'
     mail.set_content("\n".join([subject(batch["day"]), "", *plain, "", instructions, token]))
     html = f"""<!doctype html>
@@ -49,7 +49,8 @@ def gallery_message(batch, artworks, delivery, folder, sender, preview=False):
 <p style="color:#ccc1ce">{escape(batch["day"])}</p>
 <table role="presentation" style="width:100%;border-collapse:collapse">{''.join(rows)}</table>
 <p>Reply directly to this email with one of these commands.</p>
-<p style="line-height:2"><code>APPROVE: 01, 03, 04</code><br><code>APPROVE: ALL</code><br><code>SKIP</code></p>
+<p style="line-height:2"><code>05</code><br><code>01,03,05</code><br><code>01；03；05</code><br><code>APPROVE: ALL</code><br><code>SKIP</code></p>
+<p>Separate numbers with English or Chinese commas or semicolons. The APPROVE: prefix is optional for numbers.</p>
 <p style="color:#b9b1ba;font-size:13px">{escape(token)}</p>
 </div></body></html>"""
     mail.add_alternative(html, subtype="html")

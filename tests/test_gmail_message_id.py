@@ -10,7 +10,8 @@ from test_mail_publish import GmailFixture
 from test_gmail_self_approval import gmail_fixture, self_reply
 
 
-def test_gmail_rewritten_message_id_uses_verified_sent_original(tmp_path, monkeypatch):
+@pytest.mark.parametrize("previously_ignored", [False, True])
+def test_gmail_rewritten_message_id_uses_verified_sent_original(tmp_path, monkeypatch, previously_ignored):
     env = Environment(tmp_path, values={"GMAIL_SENDER": "curator@gmail.com",
                       "GMAIL_RECIPIENT": "xwyu@udel.edu", "GMAIL_APPROVER": "xwyu@udel.edu"}, load_config=False)
     store = Store(env.state)
@@ -22,7 +23,7 @@ def test_gmail_rewritten_message_id_uses_verified_sent_original(tmp_path, monkey
     original = parse(sender.outbound.as_bytes())
     actual_id = "<gmail-assigned-id@mail.gmail.com>"
     original.replace_header("Message-ID", actual_id)
-    reply = self_reply(delivery)
+    reply = self_reply(delivery, text="01")
     reply.replace_header("To", "curator@gmail.com")
     reply.replace_header("In-Reply-To", actual_id)
     reply.replace_header("References", actual_id)
@@ -35,7 +36,12 @@ def test_gmail_rewritten_message_id_uses_verified_sent_original(tmp_path, monkey
     # The stable batch/nonce fallback reconciles an accepted send even when
     # searching for our original RFC Message-ID returns no matches.
     assert client.find(delivery["message"]) == {"id": delivery["provider_id"], "threadId": delivery["thread"]}
-    assert service.check(store, env, False, client) == (1, 1)
+    if previously_ignored:
+        with monkeypatch.context() as legacy:
+            legacy.setattr(service, "parse_command", lambda value, available: None)
+            assert service.check(store, env, False, client) == (0, 0)
+        assert service.check(store, env, False, client) == (0, 0)
+    assert service.check(store, env, False, client, recheck_ignored=previously_ignored) == (1, 1)
     assert service.check(store, env, False, client) == (0, 0)
     with store.connect() as db:
         assert db.execute("SELECT result FROM replies WHERE id='wrong'").fetchone()[0] == "ignored"

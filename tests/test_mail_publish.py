@@ -20,7 +20,12 @@ from conftest import fake_generation
 @pytest.mark.parametrize(("text", "result"), [
     ("APPROVE: 01, 03, 03", ("approve", {1, 3})), ("approve: all", ("approve", {1, 3, 4})),
     ("SKIP", ("skip", set())), ("APPROVE: 01, 02", None), ("APPROVE: 0", None),
-    ("approve 1", None), ("APPROVE: 1; 3", None), ("APPROVE: 1, ", None),
+    ("approve 1", None), ("APPROVE: 1; 3", ("approve", {1, 3})), ("APPROVE: 1, ", None),
+    ("03", ("approve", {3})), ("01,03", ("approve", {1, 3})),
+    ("01；03", ("approve", {1, 3})), ("01，04", ("approve", {1, 4})),
+    ("1; 3，04", ("approve", {1, 3, 4})), ("0", None), ("05", None),
+    ("1 3", None), ("1/3", None), ("1;", None), ("0001", None),
+    ("ALL", None), ("Please publish 03", None),
 ])
 def test_command_numbers(text, result):
     assert parse_command(text, {1, 3, 4}) == result

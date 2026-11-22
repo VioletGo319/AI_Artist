@@ -1,6 +1,32 @@
 import { expect, test } from '@playwright/test'
 
-test('production build displays the empty approved manifest', async ({ page }) => {
+test('production build renders only the approved manifest', async ({ page }) => {
+  const response = await page.request.get('http://127.0.0.1:4174/gallery/manifest.json')
+  expect(response.ok()).toBeTruthy()
+  const manifest = await response.json()
+  await page.goto('http://127.0.0.1:4174/')
+  await expect(page.getByRole('heading', { name: 'AI Art Museum' })).toBeVisible()
+  const cards = page.locator('#collection .tile')
+  await expect(cards).toHaveCount(manifest.artworks.length)
+  const actual = await cards.locator('.tile-image a').evaluateAll((links) =>
+    links.map((link) => link.getAttribute('href')).sort())
+  expect(actual).toEqual(manifest.artworks.map((work: { id: string }) => `#/art/${work.id}`).sort())
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(page.viewportSize()!.width)
+  if (manifest.artworks.length) {
+    const first = cards.first()
+    await first.scrollIntoViewIfNeeded()
+    await expect(first.locator('h3')).toHaveText(manifest.artworks[0].title)
+    await expect.poll(() => first.locator('img').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0)
+    await first.locator('.tile-image a').click()
+    await expect(page.getByRole('heading', { name: manifest.artworks[0].title, exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: 'Prompt', exact: true })).toBeVisible()
+  }
+})
+
+test('production build handles an empty approved manifest', async ({ page }) => {
+  await page.route('**/gallery/manifest.json', (route) => route.fulfill({
+    json: { version: 1, artworks: [] },
+  }))
   await page.goto('http://127.0.0.1:4174/')
   await expect(page.getByRole('heading', { name: 'AI Art Museum' })).toBeVisible()
   await expect(page.getByText('The collection opens with its first approved work.')).toBeVisible()

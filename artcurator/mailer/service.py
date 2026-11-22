@@ -134,7 +134,7 @@ def mark_sent(store, batch, result, stamp):
     return "sent"
 
 
-def check(store, env, mock, transport=None):
+def check(store, env, mock, transport=None, *, recheck_ignored=False):
     medium = "mock" if mock else "gmail"
     minimum = (datetime.now(timezone.utc) - timedelta(days=env.settings.mail.reply_days)).isoformat()
     with store.lock("mail"):
@@ -154,7 +154,9 @@ def check(store, env, mock, transport=None):
             for identity, thread, timestamp, mail, authenticated_sender, original_message_id in sorted(
                     transport.replies(delivery), key=lambda row: (row[2], row[0])):
                 with store.connect() as db:
-                    if db.execute("SELECT 1 FROM replies WHERE id=?", (identity,)).fetchone():
+                    previous = db.execute("SELECT batch,result FROM replies WHERE id=?", (identity,)).fetchone()
+                    if previous and (not recheck_ignored or previous["result"] != "ignored"
+                                     or previous["batch"] != delivery["batch"]):
                         continue
                 try:
                     valid = (thread == delivery["thread"] and timestamp >= after
@@ -166,8 +168,14 @@ def check(store, env, mock, transport=None):
                     command = None
                 with store.connect(write=True) as db:
                     result = command[0] if command else "ignored"
-                    db.execute("INSERT INTO replies(id,batch,result) VALUES (?,?,?)",
-                               (identity, delivery["batch"], result))
+                    if previous:
+                        # An explicit operator retry still runs every sender,
+                        # thread, batch and command check against the real mail.
+                        db.execute("UPDATE replies SET result=? WHERE id=? AND batch=? AND result='ignored'",
+                                   (result, identity, delivery["batch"]))
+                    else:
+                        db.execute("INSERT INTO replies(id,batch,result) VALUES (?,?,?)",
+                                   (identity, delivery["batch"], result))
                     if not command:
                         continue
                     replies += 1
