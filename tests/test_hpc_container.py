@@ -56,3 +56,30 @@ def test_gpu_container_rejects_missing_allocation(container_adapter):
     env["SLURM_JOB_ID"] = "123"
     result = subprocess.run(["bash", str(wrapper), "--version"], env=env, capture_output=True, text=True)
     assert result.returncode != 0 and "must allocate a GPU" in result.stderr
+
+
+def test_shared_unsquashfs_is_visible_with_minimal_slurm_path(container_adapter):
+    wrapper, env = container_adapter
+    root = wrapper.parent.parent
+    helper = root / "shared-tools" / "unsquashfs"
+    helper.parent.mkdir()
+    helper.write_text("#!/bin/sh\nprintf 'shared helper ready\\n'\n")
+    helper.chmod(0o700)
+    with (root / "private/runtime.env").open("a") as file:
+        file.write(f"HPC_UNSQUASHFS={shlex.quote(str(helper))}\n")
+    (root / "apptainer").write_text(
+        f"#!{sys.executable}\nimport subprocess\n"
+        "print(subprocess.check_output(['unsquashfs', '-version'], text=True).strip())\n")
+    env.update(PATH="/usr/bin:/bin", SLURM_JOB_ID="123", CUDA_VISIBLE_DEVICES="0")
+    result = subprocess.run(["/bin/bash", str(wrapper), "--version"], env=env,
+                            capture_output=True, text=True, check=True)
+    assert result.stdout.strip() == "shared helper ready"
+
+
+def test_invalid_shared_unsquashfs_fails_before_launch(container_adapter):
+    wrapper, env = container_adapter
+    with (wrapper.parent.parent / "private/runtime.env").open("a") as file:
+        file.write("HPC_UNSQUASHFS=missing-relative-tool\n")
+    result = subprocess.run(["bash", str(wrapper), "--version"], env=env, capture_output=True, text=True)
+    assert result.returncode == 2 and "HPC_UNSQUASHFS" in result.stderr
+    assert not result.stdout

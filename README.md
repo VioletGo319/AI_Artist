@@ -77,6 +77,8 @@ hf download Tongyi-MAI/Z-Image-Turbo --local-dir weights/diffusers/Tongyi-MAI/Z-
 
 **CentOS 7 容器环境。** glibc 2.17 的宿主机不能直接使用许多现代 Python/CUDA wheels。可用 Apptainer 分离轻量控制环境和 GPU 模型环境：远端创建 `containers/`、`private/`，把 `config/hpc-runtime.env.example` 复制为 `private/runtime.env`（权限 600），填入 Apptainer、两个 SIF 镜像与镜像内 Python 的绝对路径。然后把私机 `HPC_REMOTE_PYTHON` 指向远端 `config/hpc-python.sh`，赋予脚本执行权限。远端也必须有项目根目录的 `config.yaml`。
 
+若计算节点没有系统 `unsquashfs`，必须配置 `HPC_UNSQUASHFS` 为管理员安装的共享可执行文件。Caviness 当前路径为 `/opt/shared/squashfs-tools/4.6.1/bin/unsquashfs`。包装脚本会将其目录加入 Slurm 的最小 PATH；登录节点自带该命令不能证明计算节点也有它。首次真实启动曾因缺少此路径在模型加载前失败，已补上此配置和最小 PATH 回归测试。
+
 脚本在登录节点使用控制镜像，显式清空 `CUDA_VISIBLE_DEVICES`；在 Slurm 作业内要求分配的 GPU 标识，使用模型镜像、`--nv` 并保留 Slurm 的设备映射。只挂载项目目录，使用干净的环境，不传递 Gmail/OAuth 凭据。SIF 临时展开使用节点本地临时目录，避免共享 NFS 的清理问题。可先用官方 `python:3.12-slim-bookworm` 镜像创建 `.venv-control`，安装 `pip install -e .`；GPU 镜像需要独立安装已固定的模型依赖与缓存权重。控制容器的 Python 和 mock 测试通过不代表 A100 推理通过。完整测试还需要镜像包含 `git` 和 `ps`，轻量控制镜像默认没有这两个命令。
 
 容器不能替换宿主 GPU 驱动。须取得 **A100 计算节点的实际驱动版本**，再选择 CUDA/PyTorch/vLLM 组合；VALET 中 CUDA toolkit 的版本不能代替此信息。兼容性检查也必须经 Slurm 申请，计入当日一次任务额度。不要在登录节点安装系统 glibc、启动推理或常驻轮询。[Apptainer GPU 要求](https://apptainer.org/docs/user/latest/gpu.html)

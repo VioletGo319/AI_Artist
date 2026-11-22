@@ -9,6 +9,15 @@ if [[ ! -f "$runtime" ]]; then
 fi
 # This is a private, user-controlled shell configuration, never downloaded data.
 source "$runtime"
+# Compute nodes may lack the login node's system unsquashfs. Slurm starts
+# with a minimal PATH, so explicitly expose the administrator's shared tool.
+if [[ -n "${HPC_UNSQUASHFS:-}" ]]; then
+    if [[ "$HPC_UNSQUASHFS" != /* || ! -x "$HPC_UNSQUASHFS" ]]; then
+        printf 'HPC_UNSQUASHFS must be an absolute executable path.\n' >&2
+        exit 2
+    fi
+    export PATH="$(dirname "$HPC_UNSQUASHFS"):$PATH"
+fi
 export APPTAINER_CACHEDIR="$curator_root/work/apptainer-cache"
 # Old hosts without squashfuse unpack SIF files. Use node-local storage: NFS
 # temporary rootfs cleanup can fail on .nfs files even after successful runs.
