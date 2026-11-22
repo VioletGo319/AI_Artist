@@ -14,7 +14,7 @@ function useHash() {
 }
 
 function Mark() {
-  return <span className="brand-mark" aria-hidden="true"><i/><i/><i/></span>
+  return <span className="brand-mark" aria-hidden="true"><i/><i/><i/><i/></span>
 }
 
 function FavoriteButton({ active, toggle }: { active: boolean; toggle: () => void }) {
@@ -126,8 +126,8 @@ function App() {
       <div className="shell header-inner">
         <a className="brand" href="#" aria-label="AI Art Museum home"><Mark/>AI Art Museum</a>
         <nav aria-label="Main navigation">
-          <a href="#collection" aria-current={!favoritesOnly && !detailId ? 'location' : undefined}>Collection</a>
-          <a href="#monthly">Monthly picks</a>
+          <a href="#collection" aria-current={!favoritesOnly && !detailId && hash !== '#monthly' ? 'location' : undefined}>Collection</a>
+          <a href="#monthly" aria-current={hash === '#monthly' ? 'location' : undefined}>Monthly picks</a>
           <a href="#favorites" aria-current={favoritesOnly ? 'location' : undefined}><span aria-hidden="true">♡ </span>Favorites</a>
         </nav>
       </div>
@@ -137,20 +137,23 @@ function App() {
       {works ? <><h1>Artwork unavailable</h1><a href="#collection">Back to collection</a></> : unavailable}
     </main>) : <main>
       {!favoritesOnly && <section className="hero">
-        <div className="hero-art" aria-hidden="true"><div className="halo"/><div className="orbital orbital-a"/>
-          <div className="orbital orbital-b"/><div className="orbital orbital-c"/><div className="orbital orbital-d"/></div>
         <div className="shell hero-content">
-          <p className="eyebrow">An evolving collection</p>
-          <h1>AI Art <em>Museum</em></h1>
-          <p>Curated by Human, Created by AI</p>
-          <a className="button accent" href="#collection">Explore the collection</a>
+          <div>
+            <p className="eyebrow">An independent digital gallery</p>
+            <h1>AI Art <span>Museum</span></h1>
+          </div>
+          <div className="hero-note">
+            <p className="hero-tagline">Curated by Human,<br/>{' '}Created by AI.</p>
+            <p className="hero-description">New perspectives. Unexpected details.<br/>{' '}A growing collection, chosen with care.</p>
+            <a className="button accent" href="#collection">Explore the collection</a>
+          </div>
         </div>
       </section>}
       <section className="shell collection" id={favoritesOnly ? 'favorites' : 'collection'}>
         <div className="section-heading">
           <div>
-            <p className="eyebrow">{favoritesOnly ? 'Saved on this device' : 'The archive'}</p>
-            <h2>{favoritesOnly ? 'Favorites' : 'Collection'}</h2>
+            <p className="eyebrow">{favoritesOnly ? 'Saved on this device' : 'Selected works'}</p>
+            <h2>{favoritesOnly ? 'Favorites' : 'Collection'}{visible && <span className="work-count">{visible.length}</span>}</h2>
           </div>
           <div className="filters">
             <label><span>Theme</span><select value={theme} onChange={(event) => setTheme(event.target.value)}>
@@ -164,15 +167,21 @@ function App() {
         {works?.some((work) => work.mock) && <p className="demo" role="status">Private demo · simulated artworks</p>}
         {visible ? visible.length ? <div className="masonry">{visible.map(card)}</div>
           : <div className="empty">
+            <span className="empty-mark" aria-hidden="true"><Mark/></span>
+            <p className="eyebrow">{favoritesOnly ? 'Your personal collection' : works?.length ? 'A different perspective' : 'A little space for something new'}</p>
             <h3>{favoritesOnly && favorites.length === 0 ? 'Your favorites will appear here.'
               : works?.length ? 'No works match these filters.' : 'The collection opens with its first approved work.'}</h3>
+            <p className="empty-description">{favoritesOnly ? 'Save the pieces you love and revisit them here.'
+              : works?.length ? 'Try another theme or date to discover more.' : 'Every piece is personally selected before it finds a place here.'}</p>
             {(theme || month) && <button className="button" onClick={() => { setTheme(''); setMonth('') }}>Clear filters</button>}
             {favoritesOnly && favorites.length === 0 && <a href="#collection">Browse the collection</a>}
           </div> : unavailable}
       </section>
       {!favoritesOnly && <section className="shell monthly" id="monthly">
-        <p className="eyebrow">{(month || dates[0]) ? readableDate(month || dates[0], true) : 'The archive'}</p>
-        <h2>Monthly picks</h2>
+        <div className="monthly-heading"><div>
+          <p className="eyebrow">{(month || dates[0]) ? readableDate(month || dates[0], true) : 'Worth another look'}</p>
+          <h2>Monthly picks</h2>
+        </div><p className="muted">A few favorites from the collection.</p></div>
         {featured?.length ? <div className="picks">{featured.map(card)}</div>
           : <p className="muted">Monthly picks appear as works enter the collection.</p>}
       </section>}
