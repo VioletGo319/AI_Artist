@@ -59,7 +59,7 @@ def test_default_hpc_mode_never_starts_a_local_gpu(tmp_path):
     env = Environment(tmp_path, values={}, load_config=False)
     store = Store(env.state)
     assert env.settings.scheduler.mode == "slurm"
-    assert env.settings.scheduler.runtime_minutes == 120
+    assert env.settings.scheduler.runtime_minutes == 30
     with patch.object(service, "launch_local", side_effect=AssertionError("must not start local GPU")), \
             patch("subprocess.run", side_effect=AssertionError("must not reach SSH")):
         assert "disabled" in service.schedule(store, env, NOW)
@@ -71,13 +71,15 @@ def test_default_hpc_mode_never_starts_a_local_gpu(tmp_path):
 def test_slurm_runtime_and_single_gpu(setup):
     env, _ = setup
     with pytest.raises(ValueError):
-        Schedule(runtime_minutes=121)
+        Schedule(runtime_minutes=31)
     dry = service.dry_run(env, NOW)["slurm_example"]
-    assert "--time=02:00:00" in dry and "--gres=gpu:a100:1" in dry and "--no-requeue" in dry
+    assert "--time=00:30:00" in dry and "--gres=gpu:a100:1" in dry and "--no-requeue" in dry
     assert "--export=PATH=/usr/bin:/bin" in dry and "--export=NIL" not in dry
-    assert "--deadline=2026-11-22T12:10:00" in dry
+    assert "--deadline=2026-11-22T10:40:00" in dry
+    with pytest.raises(ValueError, match="30 minutes"):
+        Slurm(env, dry=True).arguments(SimpleNamespace(id="a" * 32), NOW, 31)
     script = (Environment().root / "config/slurm.sbatch").read_text()
-    assert "#SBATCH --time=02:00:00" in script and "#SBATCH --gres=gpu:a100:1" in script
+    assert "#SBATCH --time=00:30:00" in script and "#SBATCH --gres=gpu:a100:1" in script
     assert "nvidia-smi" not in script
     result = subprocess.run(["bash", "-n", "config/slurm.sbatch"], capture_output=True)
     assert result.returncode == 0
@@ -111,7 +113,7 @@ class FakeSlurm:
     def submit(self, plan, deadline, runtime, admit_deadline):
         self.calls += 1
         self.plan = plan
-        assert runtime <= 120
+        assert runtime <= 30
         self.jobs = ["17"] if self.accept else []
         return self.jobs[0] if self.jobs else None
 

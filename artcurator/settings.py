@@ -10,6 +10,7 @@ import yaml
 ROOT = Path(__file__).resolve().parent.parent
 FLUX = "black-forest-labs/flux-3-image-klein"
 Z_IMAGE = "Tongyi-MAI/Z-Image-Turbo"
+MAX_RUNTIME_MINUTES = 30
 SIZES = {"1:1": (1024, 1024), "16:9": (1280, 720), "3:2": (1248, 832), "9:16": (720, 1280)}
 Backend = Literal["flux3", "diffusers", "mock"]
 
@@ -48,7 +49,7 @@ class Preference(Strict):
 class Schedule(Strict):
     mode: Literal["local", "slurm", "off"] = "slurm"
     start_hour: int = Field(8, ge=0, le=23)
-    runtime_minutes: int = Field(120, ge=1, le=120)
+    runtime_minutes: int = Field(MAX_RUNTIME_MINUTES, ge=1, le=MAX_RUNTIME_MINUTES)
     admission_minutes: int = Field(10, ge=1, le=60)
     cpus: int = Field(8, ge=1, le=64)
     memory: str = Field("64G", pattern=r"^[1-9][0-9]*[MG]$")

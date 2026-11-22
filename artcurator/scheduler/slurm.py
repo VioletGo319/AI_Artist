@@ -12,6 +12,7 @@ from PIL import Image
 
 from artcurator.generator.plan import Plan, save_plan
 from artcurator.generator.worker import directory, finalize, get_plan, persist_candidate, recover_written
+from artcurator.settings import MAX_RUNTIME_MINUTES
 
 TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 HOST = re.compile(r"(?:[A-Za-z0-9_][A-Za-z0-9_.-]*@)?[A-Za-z0-9][A-Za-z0-9_.-]*")
@@ -39,6 +40,8 @@ class Slurm:
             raise ValueError("Invalid Slurm settings.")
 
     def arguments(self, plan, deadline, runtime, scheduled_day=None):
+        if not 1 <= runtime <= MAX_RUNTIME_MINUTES:
+            raise ValueError("Slurm runtime must be between 1 and 30 minutes.")
         # Slurm interprets its time strings in the approved submission host's timezone.
         time_limit = f"{runtime // 60:02d}:{runtime % 60:02d}:00"
         return ["sbatch", "--parsable", f"--account={self.account}", f"--partition={self.partition}",

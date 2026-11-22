@@ -187,7 +187,7 @@ def main(argv=None):
                 raise ValueError("A timezone-aware deadline is required.")
             signal.signal(signal.SIGTERM, interrupt_worker)
             signal.signal(signal.SIGUSR1, interrupt_worker)
-            deadline = min(now + timedelta(hours=2), args.deadline)
+            deadline = min(now + timedelta(minutes=env.settings.scheduler.runtime_minutes), args.deadline)
             signal.signal(signal.SIGALRM, interrupt_worker)
             signal.setitimer(signal.ITIMER_REAL, max(.001, (deadline - now).total_seconds()))
             try:

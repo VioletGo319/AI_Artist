@@ -18,7 +18,7 @@ scheduler:
   # Production runs on one authorized HPC A100; never fall back to a local GPU.
   mode: slurm
   start_hour: 8
-  runtime_minutes: 120
+  runtime_minutes: 30
   admission_minutes: 10
   cpus: 8
   memory: 64G

@@ -2,7 +2,7 @@
 
 **AI Art Museum — Curated by Human, Created by AI**
 
-一个由私人设备调度、由人批准、由静态网站展出的 AI 艺术馆。默认后端为 FLUX 3 Image Klein，生产生图使用 HPC 单张 A100；每天最多一次任务、每次最多 120 分钟，不自动回退到本地 GPU。生产清单从零件作品开始。模拟候选、原始邮件、编号、审批记录和模型权重各自保存在私有目录。
+一个由私人设备调度、由人批准、由静态网站展出的 AI 艺术馆。默认后端为 FLUX 3 Image Klein，生产生图使用 HPC 单张 A100；每天最多一次任务、每次最多 30 分钟，不自动回退到本地 GPU。生产清单从零件作品开始。模拟候选、原始邮件、编号、审批记录和模型权重各自保存在私有目录。
 
 ## 五分钟跑通本地模拟
 
@@ -73,9 +73,11 @@ hf download Tongyi-MAI/Z-Image-Turbo --local-dir weights/diffusers/Tongyi-MAI/Z-
 1. 在私人设备运行 `python -m artcurator scheduler --dry-run`。此命令仅打印计划。
 2. 取得授权后，把代码、环境及已许可的权重放到管理员允许的位置。远端只需要 Python 基础包与模型环境。创建私有 `private/` 和 `weights/`，保持 OAuth、Gmail 和 Git 发布凭据在私人设备。SQLite 与文件锁需要支持 POSIX 锁的持久文件系统。
 3. 已根据报告的 Slurm 17.11.8 调整参数：使用 `--export=PATH=/usr/bin:/bin` 显式传递最小环境（该版本不支持 `NIL`），通过远端 `id -u` 和 `squeue --user` 查询本账号作业（不使用 `--me`）。保留 `--deadline`、`--no-requeue`。让管理员核实 `gpu:a100:1` 名称、A100 40GB 可见范围及分区/QoS 权限。Slurm 解析提交时间时使用提交主机时区，当前配置应与该主机一致。先核对 SSH host key，配置管理员允许的非交互式 SSH 路径。参数参照 [Slurm 17.11.8 sbatch 手册](https://github.com/SchedMD/slurm/blob/slurm-17-11-8-1/doc/man/man1/sbatch.1)和 [squeue 手册](https://github.com/SchedMD/slurm/blob/slurm-17-11-8-1/doc/man/man1/squeue.1)；尚未完成真实集群作业验证。
-4. 在私机填入 `HPC_HOST`、`HPC_ACCOUNT`、`HPC_PARTITION`、`HPC_QOS`、`HPC_REMOTE_ROOT`、`HPC_REMOTE_PYTHON`。路径用远端绝对路径。确认后在私机设置三个 HPC 开关，保持 `scheduler.mode: slurm`，再使用 `scheduler` 或 `tick`。默认时间上限 `runtime_minutes: 120` 不能超过 120；作业为 `--gres=gpu:a100:1 --time=02:00:00`。
+4. 在私机填入 `HPC_HOST`、`HPC_ACCOUNT`、`HPC_PARTITION`、`HPC_QOS`、`HPC_REMOTE_ROOT`、`HPC_REMOTE_PYTHON`。路径用远端绝对路径。确认后在私机设置三个 HPC 开关，保持 `scheduler.mode: slurm`，再使用 `scheduler` 或 `tick`。默认时间上限 `runtime_minutes: 30` 不能超过 30；作业为 `--gres=gpu:a100:1 --time=00:30:00`。
 
-每个本地日期共享一条 SQLite 调度记录，每天最多调用一次真实 `sbatch`，累计 GPU 运行时间不超过两小时。默认请求一张 A100、两小时墙钟和约 10 分钟排队准入窗口。若接近午夜，调度器收紧窗口。等待资源失败时当日作废，并在后续状态检查中取消超期作业。抢占后不自动重新入队。私机发出短时 SSH 命令记录状态，并在作业退出后拉取已完成的候选。无需在登录节点保持轮询进程。
+每个本地日期共享一条 SQLite 调度记录，每天最多调用一次真实 `sbatch`，累计 GPU 运行时间不超过 30 分钟。默认请求一张 A100、30 分钟墙钟和约 10 分钟排队准入窗口。若接近午夜，调度器收紧窗口。等待资源失败时当日作废，并在后续状态检查中取消超期作业。抢占后不自动重新入队。私机发出短时 SSH 命令记录状态，并在作业退出后拉取已完成的候选。无需在登录节点保持轮询进程。
+
+**释放 GPU。** 正常完成、超时、抢占或异常退出时，worker 会保存已完成作品、丢弃模型引用并尽力释放本进程的 PyTorch 空闲缓存。Prompt Upsampler 使用独立进程组，父进程在所有退出路径回收该组，避免残留 vLLM 子进程。worker 退出释放 CUDA context，Slurm 负责收回作业分配；强制终止时由 Slurm 清理作业进程。不会重置 GPU、终止其他用户进程或删除权重缓存。`empty_cache()` 只释放未使用的缓存，不能替代进程退出，也不保证共享节点的总显存使用率归零。此清理路径有模拟 CUDA 与真实 CPU 子进程测试，尚未完成真实 A100 验证。
 
 **恢复。** 按图保存的检查点包括 Prompt、PNG、种子和原始生成时间。恢复从未完成编号继续，单张推理中间的扩散状态会重新计算。默认将抢占时已保存的部分候选送审。使用分开的 `scheduler`、`send-email` 命令可以先保留未送审批次，在之后一个日期的唯一配额内执行 `python -m artcurator scheduler --resume YYYY-MM-DD` 恢复 Slurm 批次，或用 `python -m artcurator generate --resume --day YYYY-MM-DD` 恢复本地批次。已投递批次的编号和内容冻结。主机中断导致提交结果不明时，按唯一 JobName 对账。无资源而跳过的日批次不会自动补跑。
 

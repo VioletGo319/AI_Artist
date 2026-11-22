@@ -3,7 +3,6 @@ from hashlib import sha256
 from io import BytesIO
 import json
 import os
-import signal
 import subprocess
 import sys
 
@@ -11,6 +10,7 @@ from PIL import Image, ImageStat
 
 from artcurator.generator.backends import NoGPU, check_cache, gpu, make_upsampler, renderer
 from artcurator.generator.plan import Plan
+from artcurator.generator.resources import release_cuda_cache, run_isolated
 from artcurator.store import atomic, utcnow
 
 
@@ -59,12 +59,17 @@ def expand(store, env, plan):
     missing = [(i, slot) for i, slot in enumerate(plan.slots, 1) if not (folder / f"{i:02d}.prompt").is_file()]
     if not missing:
         return
-    upsample = make_upsampler(env, plan)
-    for i, slot in missing:
-        caption = upsample(slot.prompt)
-        if not caption.strip():
-            raise RuntimeError("FLUX prompt upsampler returned an empty caption.")
-        atomic(folder / f"{i:02d}.prompt", caption.encode())
+    upsample = None
+    try:
+        upsample = make_upsampler(env, plan)
+        for i, slot in missing:
+            caption = upsample(slot.prompt)
+            if not caption.strip():
+                raise RuntimeError("FLUX prompt upsampler returned an empty caption.")
+            atomic(folder / f"{i:02d}.prompt", caption.encode())
+    finally:
+        upsample = None
+        release_cuda_cache()
 
 
 def generation_state(store, plan, state, unsealed=True):
@@ -87,6 +92,7 @@ def run(store, env, plan, deadline, hpc=False):
         with store.connect() as db:
             if db.execute("SELECT 1 FROM deliveries WHERE batch=?", (plan.id,)).fetchone():
                 return len(store.artworks(plan.id))
+        draw = None
         try:
             if plan.backend != "mock":
                 gpu(only_a100=hpc)
@@ -100,7 +106,7 @@ def run(store, env, plan, deadline, hpc=False):
             folder.mkdir(parents=True, mode=0o700, exist_ok=True)
             if plan.backend == "flux3":
                 command = [sys.executable, "-m", "artcurator", "_expand", "--batch", plan.id]
-                subprocess.run(command, cwd=env.root, env=child_environment(env), check=True,
+                run_isolated(command, cwd=env.root, env=child_environment(env), check=True,
                                timeout=max(1, (deadline - datetime.now(timezone.utc)).total_seconds()))
             draw = renderer(env, plan)
             for i, slot in enumerate(plan.slots, 1):
@@ -123,7 +129,11 @@ def run(store, env, plan, deadline, hpc=False):
         except NoGPU:
             raise
         finally:
-            finalize(store, plan)
+            draw = None
+            try:
+                finalize(store, plan)
+            finally:
+                release_cuda_cache()
         return len(store.artworks(plan.id))
 
 
@@ -192,23 +202,8 @@ def child_environment(env):
 def launch_local(env, plan, deadline):
     command = [env.get("ART_GPU_PYTHON", sys.executable), "-m", "artcurator", "_worker",
                "--batch", plan.id, "--deadline", deadline.isoformat()]
-    with subprocess.Popen(command, cwd=env.root, env=child_environment(env), start_new_session=True) as process:
-        try:
-            code = process.wait(timeout=max(0, (deadline - datetime.now(timezone.utc)).total_seconds()))
-        except BaseException as error:
-            try:
-                os.killpg(process.pid, signal.SIGTERM)
-                process.wait(timeout=4)
-            except subprocess.TimeoutExpired:
-                os.killpg(process.pid, signal.SIGKILL)
-            except ProcessLookupError:
-                pass
-            if isinstance(error, subprocess.TimeoutExpired):
-                return 124
-            raise
-        # A crashed model launcher may leave descendants in its dedicated process group.
-        try:
-            os.killpg(process.pid, signal.SIGTERM)
-        except ProcessLookupError:
-            pass
-        return code
+    try:
+        return run_isolated(command, cwd=env.root, env=child_environment(env),
+                            timeout=max(0, (deadline - datetime.now(timezone.utc)).total_seconds()))
+    except subprocess.TimeoutExpired:
+        return 124
