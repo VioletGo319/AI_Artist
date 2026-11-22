@@ -189,7 +189,7 @@ bash -n config/slurm.sbatch
 
 Automated tests cover unavailable devices, daily deduplication, Slurm authorization and deadlines, synchronization and resume after preemption, MIME generation, invalid senders and threads, batch isolation, idempotent replies and publication, and commits/pushes against a local bare Git repository. Playwright tests desktop and mobile layouts using isolated mock artifacts and the empty production manifest.
 
-Real validation has completed for Z-Image-Turbo generation on one Caviness A100 80GB, SSH result retrieval, private email preview generation, and GitHub Pages build/deployment. CI and mock tests do not substitute for real GPU validation. FLUX, A100 40GB, actual preemption/forced timeout, and Gmail OAuth sending still require validation. Generated candidates have not been approved and are absent from the public manifest.
+Real validation has completed for Z-Image-Turbo generation on one Caviness A100 80GB, SSH result retrieval, Gmail OAuth delivery of eight candidates, authenticated email approval, and Git publication of the selected artwork. On November 22, 2026, the owner's numeric reply selected work 05, “Vessels of Morning”; the other seven candidates remained private. Repeated reply processing and publication produced no duplicate approvals or Git changes. GitHub Pages build/deployment has also been exercised. CI and mock tests do not substitute for real GPU validation. FLUX, A100 40GB, and actual preemption/forced timeout still require validation. Persistent unattended scheduling is separate from this live acceptance run.
 
 ## Project structure
 
