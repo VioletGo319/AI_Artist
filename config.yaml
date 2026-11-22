@@ -15,7 +15,8 @@ generation:
 preference:
   exploration: 0.30
 scheduler:
-  mode: local
+  # Production runs on one authorized HPC A100; never fall back to a local GPU.
+  mode: slurm
   start_hour: 8
   runtime_minutes: 120
   admission_minutes: 10

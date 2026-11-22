@@ -55,6 +55,19 @@ def test_live_slurm_requires_explicit_authorization(setup):
         assert "APPROVED_PARTITION" in service.dry_run(env, NOW)["slurm_example"]
 
 
+def test_default_hpc_mode_never_starts_a_local_gpu(tmp_path):
+    env = Environment(tmp_path, values={}, load_config=False)
+    store = Store(env.state)
+    assert env.settings.scheduler.mode == "slurm"
+    assert env.settings.scheduler.runtime_minutes == 120
+    with patch.object(service, "launch_local", side_effect=AssertionError("must not start local GPU")), \
+            patch("subprocess.run", side_effect=AssertionError("must not reach SSH")):
+        assert "disabled" in service.schedule(store, env, NOW)
+        with pytest.raises(ValueError, match="Local GPU generation is disabled"):
+            service.start_local(store, env, NOW, DAY, 8)
+    assert store.batch() is None
+
+
 def test_slurm_runtime_and_single_gpu(setup):
     env, _ = setup
     with pytest.raises(ValueError):

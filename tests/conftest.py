@@ -11,6 +11,7 @@ from artcurator.store import Store
 @pytest.fixture
 def setup(tmp_path):
     env = Environment(tmp_path, values={"ART_BACKEND": "mock", "ART_PUBLIC_DIR": "demo/public"}, load_config=False)
+    env.settings.scheduler.mode = "local"
     return env, Store(env.state)
 
 

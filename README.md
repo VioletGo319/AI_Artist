@@ -2,7 +2,7 @@
 
 **AI Art Museum — Curated by Human, Created by AI**
 
-一个由私人设备调度、由人批准、由静态网站展出的 AI 艺术馆。默认后端为 FLUX 3 Image Klein。生产清单从零件作品开始。模拟候选、原始邮件、编号、审批记录和模型权重各自保存在私有目录。
+一个由私人设备调度、由人批准、由静态网站展出的 AI 艺术馆。默认后端为 FLUX 3 Image Klein，生产生图使用 HPC 单张 A100；每天最多一次任务、每次最多 120 分钟，不自动回退到本地 GPU。生产清单从零件作品开始。模拟候选、原始邮件、编号、审批记录和模型权重各自保存在私有目录。
 
 ## 五分钟跑通本地模拟
 
@@ -36,12 +36,12 @@ python -m artcurator status
 
 `--latest` 选择最新的可投递批次，也可以传 `--day YYYY-MM-DD`。每封邮件的第一个有效 `APPROVE: 01, 03`、`APPROVE: ALL` 或 `SKIP` 会结束该轮审批。批次不完整时编号可能跳号。重复调用发送、审批和发布保持幂等。CLI 输出空结果、跳过、部分成功或失败的状态。普通错误返回 1，无 GPU 被调度器记录为正常跳过。
 
-## 模型与 RTX 5090
+## HPC A100 模型环境
 
-建议 RTX 5090 使用 Linux 或支持 CUDA 的 WSL2、Python 3.12、适配 CUDA wheel 的 NVIDIA 驱动及专用的单卡时段。请在独立终端配置生产环境，避免继承模拟示例的 `ART_*` 导出。
+目标为经授权的 HPC A100 40GB。请按管理员允许的方式准备 Linux、Python 3.12 和兼容集群驱动的 PyTorch/CUDA 环境；以下命令仅准备依赖和缓存，不申请或启动 GPU。避免继承模拟示例的 `ART_*` 导出。
 
 ```bash
-cp .env.example .env
+# 私人调度设备的 .env 不得复制到 HPC。
 python3.12 -m venv .venv-gpu
 . .venv-gpu/bin/activate
 python -m pip install -e . -r requirements-flux.txt \
@@ -51,15 +51,15 @@ hf download black-forest-labs/flux-3-image-klein \
   --local-dir weights/flux-3-image-klein \
   --include model.safetensors ae.safetensors 'text_encoder/*'
 hf download black-forest-labs/flux-3-image-klein-pup --local-dir weights/pup
-CUDA_VISIBLE_DEVICES=0 python -m artcurator generate --count 1
-python -m artcurator preview-email --latest
+# 在私人调度设备检查计划（不会提交）：
+python -m artcurator scheduler --dry-run
 ```
 
-先在 Hugging Face 账号中阅读并同意 gated 模型条款。FLUX 3 Image Klein 是开放权重模型，使用 **FLUX Kommunity License**，其上采样器使用 Apache-2.0。私人非商业生图及公开展示作品仍须按模型条款和使用政策操作。官方仓库描述模型组合约占 52 GB，可使用 `ART_WEIGHTS_DIR` 指向预缓存目录。推理时强制离线并预检权重，下载单独执行。私有调度器可使用轻量 `.venv`，并在 `.env` 把 `ART_GPU_PYTHON` 设置为 GPU 虚拟环境解释器的绝对路径。[官方实现](https://github.com/black-forest-labs/flux-3-image-klein) · [FLUX 权重和条款](https://huggingface.co/black-forest-labs/flux-3-image-klein) · [Prompt Upsampler](https://huggingface.co/black-forest-labs/flux-3-image-klein-pup)
+先在 Hugging Face 账号中阅读并同意 gated 模型条款。FLUX 3 Image Klein 是开放权重模型，使用 **FLUX Kommunity License**，其上采样器使用 Apache-2.0。私人非商业生图及公开展示作品仍须按模型条款和使用政策操作。官方仓库描述模型组合约占 52 GB，可使用 `ART_WEIGHTS_DIR` 指向预缓存目录。推理时强制离线并预检权重，下载单独执行。私有调度器可使用轻量 `.venv`，在本机 `.env` 将 `HPC_REMOTE_PYTHON` 指向远端 GPU 环境解释器的绝对路径。[官方实现](https://github.com/black-forest-labs/flux-3-image-klein) · [FLUX 权重和条款](https://huggingface.co/black-forest-labs/flux-3-image-klein) · [Prompt Upsampler](https://huggingface.co/black-forest-labs/flux-3-image-klein-pup)
 
-默认 16-step distilled、原生 BF16、无 CFG、方形 1024×1024。可在 `generation.aspect_ratios` 混用 `1:1`、`16:9`（1280×720）、`3:2`（1248×832）、`9:16`（720×1280）。先单独启动官方 vLLM Upsampler，把每个扩展 Prompt 持久化。退出该阶段后，默认将官方文本编码器、DiT、VAE 分别迁入 GPU，使用官方采样及解码函数，降低同时驻留的显存。A100 路径没有 FP8 或 NVFP4 开关。官方 CUDA 依赖的实际可安装性和显存峰值须在两种目标 GPU 上分别验证。[BFL 的显存与分阶段说明](https://github.com/black-forest-labs/flux-3-image-klein#smaller-gpus)
+默认 16-step distilled、原生 BF16、无 CFG、方形 1024×1024。可在 `generation.aspect_ratios` 混用 `1:1`、`16:9`（1280×720）、`3:2`（1248×832）、`9:16`（720×1280）。先单独启动官方 vLLM Upsampler，把每个扩展 Prompt 持久化。退出该阶段后，默认将官方文本编码器、DiT、VAE 分别迁入 GPU，使用官方采样及解码函数，降低同时驻留的显存。A100 路径没有 FP8 或 NVFP4 开关。官方 CUDA 依赖的实际可安装性和显存峰值须在获授权的 A100 作业内验证。[BFL 的显存与分阶段说明](https://github.com/black-forest-labs/flux-3-image-klein#smaller-gpus)
 
-**备用模型。** 在独立 GPU venv 中，先按目标驱动安装支持对应架构的 CUDA PyTorch，再运行以下命令。将 `ART_BACKEND=diffusers` 和 `ART_GPU_PYTHON` 写入私有 `.env`。默认使用官方 Z-Image-Turbo（Apache-2.0）及 Diffusers 0.39.0，9 steps、guidance 0。其他 Hugging Face Diffusers 文生图模型须支持已使用的 pipeline 参数。核验许可后，配置 `diffusers_model`、`diffusers_steps`、`diffusers_guidance` 并打开 `diffusers_license_approved`，然后以相同的目录约定预下载。批次的生成配置在建档时冻结，切换模型可用于下一批。[Z-Image-Turbo 模型卡](https://huggingface.co/Tongyi-MAI/Z-Image-Turbo) · [Diffusers 版本](https://github.com/huggingface/diffusers/releases/tag/v0.39.0)
+**备用模型。** 在独立 GPU venv 中，先按目标驱动安装支持对应架构的 CUDA PyTorch，再运行以下命令。在私人调度设备的 `.env` 设置 `ART_BACKEND=diffusers`，并让 `HPC_REMOTE_PYTHON` 指向准备好的远端环境。默认使用官方 Z-Image-Turbo（Apache-2.0）及 Diffusers 0.39.0，9 steps、guidance 0。其他 Hugging Face Diffusers 文生图模型须支持已使用的 pipeline 参数。核验许可后，配置 `diffusers_model`、`diffusers_steps`、`diffusers_guidance` 并打开 `diffusers_license_approved`，然后以相同的目录约定预下载。批次的生成配置在建档时冻结，切换模型可用于下一批。[Z-Image-Turbo 模型卡](https://huggingface.co/Tongyi-MAI/Z-Image-Turbo) · [Diffusers 版本](https://github.com/huggingface/diffusers/releases/tag/v0.39.0)
 
 ```bash
 python -m pip install -e . -r requirements-diffusers.txt
@@ -68,16 +68,18 @@ hf download Tongyi-MAI/Z-Image-Turbo --local-dir weights/diffusers/Tongyi-MAI/Z-
 
 ## Caviness 与 Slurm
 
-`HPC_ENABLED`、`HPC_AUTHORIZED` 和 `HPC_OPPORTUNISTIC` 都默认关闭。先向管理员确认校园账号及用途授权、可抢占或低优先级机制、允许的账户、分区、QoS、A100 40GB GRES、文件系统和驱动。若无合适配置，保留 `scheduler.mode: local`，或用 `"off"` 停止每日尝试。脚本通过 Slurm 申请资源。私机模式假定 RTX 是留给本任务的专用设备，并用私有状态锁限制进程并发。[UD Slurm 培训资料](https://docs.hpc.udel.edu/_media/training/slurm/introduction_to_slurm_october2024.pdf) · [Slurm sbatch 文档](https://slurm.schedmd.com/sbatch.html)
+`HPC_ENABLED`、`HPC_AUTHORIZED` 和 `HPC_OPPORTUNISTIC` 都默认关闭。先向管理员确认校园账号及用途授权、可抢占或低优先级机制、允许的账户、分区、QoS、A100 40GB GRES、文件系统和驱动。默认 `scheduler.mode: slurm`。若无合适配置，保持 HPC 开关关闭，或设为 `"off"`；不会回退到 RTX 5090 或其他本地 GPU。脚本通过 Slurm 正式申请资源。[UD Slurm 培训资料](https://docs.hpc.udel.edu/_media/training/slurm/introduction_to_slurm_october2024.pdf) · [Slurm sbatch 文档](https://slurm.schedmd.com/sbatch.html)
 
 1. 在私人设备运行 `python -m artcurator scheduler --dry-run`。此命令仅打印计划。
 2. 取得授权后，把代码、环境及已许可的权重放到管理员允许的位置。远端只需要 Python 基础包与模型环境。创建私有 `private/` 和 `weights/`，保持 OAuth、Gmail 和 Git 发布凭据在私人设备。SQLite 与文件锁需要支持 POSIX 锁的持久文件系统。
 3. 让管理员核实 Caviness 当前 Slurm 版本支持本项目的 `--deadline`、`--no-requeue`、`--export=NIL`、`squeue --me`，以及 `gpu:a100:1` 的名称和 A100 40GB 可见范围。Slurm 解析提交时间时使用提交主机时区，当前配置应与该主机一致。先核对 SSH host key，配置管理员允许的非交互式 SSH 路径。
-4. 在私机填入 `HPC_HOST`、`HPC_ACCOUNT`、`HPC_PARTITION`、`HPC_QOS`、`HPC_REMOTE_ROOT`、`HPC_REMOTE_PYTHON`。路径用远端绝对路径。确认后在私机设置三个 HPC 开关，改 `scheduler.mode: slurm`，再使用 `scheduler` 或 `tick`。
+4. 在私机填入 `HPC_HOST`、`HPC_ACCOUNT`、`HPC_PARTITION`、`HPC_QOS`、`HPC_REMOTE_ROOT`、`HPC_REMOTE_PYTHON`。路径用远端绝对路径。确认后在私机设置三个 HPC 开关，保持 `scheduler.mode: slurm`，再使用 `scheduler` 或 `tick`。默认时间上限 `runtime_minutes: 120` 不能超过 120；作业为 `--gres=gpu:a100:1 --time=02:00:00`。
 
-每个本地日期共享一条 SQLite 调度记录，每天最多调用一次真实 `sbatch`。默认请求一张 A100、两小时墙钟和约 10 分钟排队准入窗口。若接近午夜，调度器收紧窗口。等待资源失败时当日作废，并在后续状态检查中取消超期作业。抢占后不自动重新入队。私机发出短时 SSH 命令记录状态，并在作业退出后拉取已完成的候选。无需在登录节点保持轮询进程。
+每个本地日期共享一条 SQLite 调度记录，每天最多调用一次真实 `sbatch`，累计 GPU 运行时间不超过两小时。默认请求一张 A100、两小时墙钟和约 10 分钟排队准入窗口。若接近午夜，调度器收紧窗口。等待资源失败时当日作废，并在后续状态检查中取消超期作业。抢占后不自动重新入队。私机发出短时 SSH 命令记录状态，并在作业退出后拉取已完成的候选。无需在登录节点保持轮询进程。
 
 **恢复。** 按图保存的检查点包括 Prompt、PNG、种子和原始生成时间。恢复从未完成编号继续，单张推理中间的扩散状态会重新计算。默认将抢占时已保存的部分候选送审。使用分开的 `scheduler`、`send-email` 命令可以先保留未送审批次，在之后一个日期的唯一配额内执行 `python -m artcurator scheduler --resume YYYY-MM-DD` 恢复 Slurm 批次，或用 `python -m artcurator generate --resume --day YYYY-MM-DD` 恢复本地批次。已投递批次的编号和内容冻结。主机中断导致提交结果不明时，按唯一 JobName 对账。无资源而跳过的日批次不会自动补跑。
+
+生产模式请使用 `scheduler` 或 `tick`，不要在 login node 上执行 `generate`。`generate` 的本地真实生图仅在显式设置 `scheduler.mode: local` 后可用；本地 mock 演示仍可运行。
 
 ## Gmail OAuth 和审批
 

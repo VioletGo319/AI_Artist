@@ -56,6 +56,8 @@ def reconcile_local(store):
 
 
 def start_local(store, env, now, day, count, resume=False, resume_day=None):
+    if env.settings.scheduler.mode != "local" and env.settings.generation.backend != "mock":
+        raise ValueError("Local GPU generation is disabled. Use scheduler for authorized HPC A100 jobs.")
     actual_day, _, end = window(env, now)
     work_day = resume_day or day
     plan, route = make_plan(store, env, work_day, count, "local")

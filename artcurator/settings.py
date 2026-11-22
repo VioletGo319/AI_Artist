@@ -46,7 +46,7 @@ class Preference(Strict):
 
 
 class Schedule(Strict):
-    mode: Literal["local", "slurm", "off"] = "local"
+    mode: Literal["local", "slurm", "off"] = "slurm"
     start_hour: int = Field(8, ge=0, le=23)
     runtime_minutes: int = Field(120, ge=1, le=120)
     admission_minutes: int = Field(10, ge=1, le=60)
