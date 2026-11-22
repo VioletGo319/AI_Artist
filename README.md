@@ -2,11 +2,13 @@
 
 **AI Art Museum — Curated by Human, Created by AI**
 
-一个由私人设备调度、由人批准、由静态网站展出的 AI 艺术馆。默认后端为 FLUX 3 Image Klein，生产生图使用 HPC 单张 A100；每天最多一次任务、每次最多 30 分钟，不自动回退到本地 GPU。生产清单从零件作品开始。模拟候选、原始邮件、编号、审批记录和模型权重各自保存在私有目录。
+A private AI art museum with generation scheduled from a personal device, human approval by email, and a static public gallery. The default model backend is FLUX 3 Image Klein. Production generation uses one authorized HPC A100 GPU, with at most one job per day and a maximum runtime of 30 minutes. There is no automatic fallback to a local GPU.
 
-## 五分钟跑通本地模拟
+The public gallery starts empty. Candidate images, raw email, batch identifiers, approval records, and model weights are stored privately. Only explicitly approved artwork is published.
 
-需要 Python 3.12、Node.js 20.19+ 或 22、npm、Bash。模拟生图使用 Pillow，不需要 GPU、Gmail、GitHub 或学校账户。
+## Quick start: local mock workflow
+
+Requirements: Python 3.12, Node.js 20.19+ or 22, npm, and Bash. The mock generator uses Pillow and requires no GPU, Gmail access, GitHub access, or university account.
 
 ```bash
 python3.12 -m venv .venv
@@ -17,9 +19,11 @@ bash config/demo.sh
 (cd web && ART_DEMO_PUBLIC=../work/demo/public npm run dev -- --host 127.0.0.1)
 ```
 
-打开终端显示的本地地址。模拟脚本生成同日 8 张候选，写入独立 HTML 邮件预览，模拟批准 01–04，并把 4 张批准作品放在 `work/demo/public/gallery/`。在 `work/demo/private/mail/` 可以查看 HTML、MIME 发件箱和模拟回信。生产构建只读取 `web/public/`，并拒绝模拟作品或未列入清单的公开图片。
+Open the local URL printed in the terminal. The demo generates eight candidates for one day, creates an HTML email preview, simulates approval of images 01–04, and writes those four images to `work/demo/public/gallery/`. The HTML preview, MIME outbox, and simulated replies are available under `work/demo/private/mail/`.
 
-逐步执行同一流程时，在仓库根目录使用以下命令。
+Production builds read only `web/public/` and reject mock artwork or public image files missing from the gallery manifest.
+
+To run the same workflow step by step, execute these commands from the repository root:
 
 ```bash
 export ART_BACKEND=mock
@@ -34,14 +38,18 @@ python -m artcurator scheduler --dry-run
 python -m artcurator status
 ```
 
-`--latest` 选择最新的可投递批次，也可以传 `--day YYYY-MM-DD`。每封邮件的第一个有效 `APPROVE: 01, 03`、`APPROVE: ALL` 或 `SKIP` 会结束该轮审批。批次不完整时编号可能跳号。重复调用发送、审批和发布保持幂等。CLI 输出空结果、跳过、部分成功或失败的状态。普通错误返回 1，无 GPU 被调度器记录为正常跳过。
+`--latest` selects the latest batch ready for delivery. Use `--day YYYY-MM-DD` to select a specific date. The first valid `APPROVE: 01, 03`, `APPROVE: ALL`, or `SKIP` reply closes the batch's approval round. Incomplete batches may have gaps in their image numbers.
 
-## HPC A100 模型环境
+Sending, approval processing, and publication are idempotent. CLI commands report empty, skipped, partial, or failed outcomes. Ordinary errors return exit code 1; the scheduler records unavailable GPUs as a normal skip.
 
-目标为经授权的 HPC A100 40GB。请按管理员允许的方式准备 Linux、Python 3.12 和兼容集群驱动的 PyTorch/CUDA 环境；以下命令仅准备依赖和缓存，不申请或启动 GPU。避免继承模拟示例的 `ART_*` 导出。
+## HPC A100 model environment
+
+The original target is an authorized HPC A100 40GB. Prepare Linux, Python 3.12, and a PyTorch/CUDA environment compatible with the cluster's driver using an administrator-approved method. The commands below install dependencies and cache weights; they do not request a GPU or start inference. Clear the mock demo's `ART_*` environment overrides before configuring production.
+
+**Check driver compatibility first.** The FLUX installation below follows the official CUDA 13 package source. For Caviness driver `550.54.15`, use the validated CUDA 12.4 Z-Image-Turbo setup described in the next section instead.
 
 ```bash
-# 私人调度设备的 .env 不得复制到 HPC。
+# Never copy the private scheduler's .env file to the HPC cluster.
 python3.12 -m venv .venv-gpu
 . .venv-gpu/bin/activate
 python -m pip install -e . -r requirements-flux.txt \
@@ -51,39 +59,59 @@ hf download black-forest-labs/flux-3-image-klein \
   --local-dir weights/flux-3-image-klein \
   --include model.safetensors ae.safetensors 'text_encoder/*'
 hf download black-forest-labs/flux-3-image-klein-pup --local-dir weights/pup
-# 在私人调度设备检查计划（不会提交）：
+# Inspect the plan on the private scheduler device without submitting a job:
 python -m artcurator scheduler --dry-run
 ```
 
-先在 Hugging Face 账号中阅读并同意 gated 模型条款。FLUX 3 Image Klein 是开放权重模型，使用 **FLUX Kommunity License**，其上采样器使用 Apache-2.0。私人非商业生图及公开展示作品仍须按模型条款和使用政策操作。官方仓库描述模型组合约占 52 GB，可使用 `ART_WEIGHTS_DIR` 指向预缓存目录。推理时强制离线并预检权重，下载单独执行。私有调度器可使用轻量 `.venv`，在本机 `.env` 将 `HPC_REMOTE_PYTHON` 指向远端 GPU 环境解释器的绝对路径。[官方实现](https://github.com/black-forest-labs/flux-3-image-klein) · [FLUX 权重和条款](https://huggingface.co/black-forest-labs/flux-3-image-klein) · [Prompt Upsampler](https://huggingface.co/black-forest-labs/flux-3-image-klein-pup)
+Read and accept the gated model's terms using your Hugging Face account before downloading. FLUX 3 Image Klein is an open-weight model under the **FLUX Kommunity License**; its Prompt Upsampler uses Apache-2.0. Private noncommercial generation and public display of outputs remain subject to the applicable license and usage policy.
 
-默认 16-step distilled、原生 BF16、无 CFG、方形 1024×1024。可在 `generation.aspect_ratios` 混用 `1:1`、`16:9`（1280×720）、`3:2`（1248×832）、`9:16`（720×1280）。先单独启动官方 vLLM Upsampler，把每个扩展 Prompt 持久化。退出该阶段后，默认将官方文本编码器、DiT、VAE 分别迁入 GPU，使用官方采样及解码函数，降低同时驻留的显存。A100 路径没有 FP8 或 NVFP4 开关。官方 CUDA 依赖的实际可安装性和显存峰值须在获授权的 A100 作业内验证。[BFL 的显存与分阶段说明](https://github.com/black-forest-labs/flux-3-image-klein#smaller-gpus)
+The official repository describes a combined model footprint of approximately 52 GB. Set `ART_WEIGHTS_DIR` to an existing cache if needed. Inference checks the cache and runs offline; downloads are a separate setup step. The private scheduler can use a lightweight `.venv`. Set `HPC_REMOTE_PYTHON` in its local `.env` to the absolute path of the remote GPU interpreter or container wrapper. [Official implementation](https://github.com/black-forest-labs/flux-3-image-klein) · [FLUX weights and terms](https://huggingface.co/black-forest-labs/flux-3-image-klein) · [Prompt Upsampler](https://huggingface.co/black-forest-labs/flux-3-image-klein-pup)
 
-**备用模型。** 在独立 GPU venv 中，先按目标驱动安装支持对应架构的 CUDA PyTorch，再运行以下命令。在私人调度设备的 `.env` 设置 `ART_BACKEND=diffusers`，并让 `HPC_REMOTE_PYTHON` 指向准备好的远端环境。默认使用官方 Z-Image-Turbo（Apache-2.0）及 Diffusers 0.39.0，9 steps、guidance 0。其他 Hugging Face Diffusers 文生图模型须支持已使用的 pipeline 参数。核验许可后，配置 `diffusers_model`、`diffusers_steps`、`diffusers_guidance` 并打开 `diffusers_license_approved`，然后以相同的目录约定预下载。批次的生成配置在建档时冻结，切换模型可用于下一批。[Z-Image-Turbo 模型卡](https://huggingface.co/Tongyi-MAI/Z-Image-Turbo) · [Diffusers 版本](https://github.com/huggingface/diffusers/releases/tag/v0.39.0)
+FLUX defaults to 16-step distilled inference, native BF16, no CFG, and 1024×1024 output. Configure `generation.aspect_ratios` to use `1:1`, `16:9` (1280×720), `3:2` (1248×832), or `9:16` (720×1280).
+
+The official vLLM Upsampler runs in a separate stage and saves each expanded prompt. After that process exits, the default inference path moves the official text encoder, DiT, and VAE onto the GPU separately, using the official sampling and decoding functions to reduce simultaneous GPU residency. The A100 path does not enable FP8 or NVFP4. Dependency compatibility and peak GPU memory must still be verified inside an authorized A100 allocation. [BFL memory and staged-inference guidance](https://github.com/black-forest-labs/flux-3-image-klein#smaller-gpus)
+
+**Fallback model.** In a separate GPU virtual environment, first install a CUDA-enabled PyTorch build compatible with the target driver and GPU architecture, then run the commands below. Set `ART_BACKEND=diffusers` on the private scheduler and point `HPC_REMOTE_PYTHON` to the prepared remote environment.
+
+The default fallback is the official Z-Image-Turbo model (Apache-2.0), using Diffusers 0.39.0, nine steps, and guidance 0. Other Hugging Face Diffusers text-to-image models must support the pipeline arguments used by this project. After reviewing a replacement model's license, configure `diffusers_model`, `diffusers_steps`, and `diffusers_guidance`, enable `diffusers_license_approved`, and download its weights using the same directory convention. Generation settings are frozen when a batch is created; model changes apply to subsequent batches. [Z-Image-Turbo model card](https://huggingface.co/Tongyi-MAI/Z-Image-Turbo) · [Diffusers release](https://github.com/huggingface/diffusers/releases/tag/v0.39.0)
 
 ```bash
 python -m pip install -e . -r requirements-diffusers.txt
 hf download Tongyi-MAI/Z-Image-Turbo --local-dir weights/diffusers/Tongyi-MAI/Z-Image-Turbo
 ```
 
-## Caviness 与 Slurm
+## Caviness and Slurm
 
-`HPC_ENABLED`、`HPC_AUTHORIZED` 和 `HPC_OPPORTUNISTIC` 都默认关闭。先向管理员确认校园账号及用途授权、可抢占或低优先级机制、允许的账户、分区、QoS、A100 40GB GRES、文件系统和驱动。默认 `scheduler.mode: slurm`。若无合适配置，保持 HPC 开关关闭，或设为 `"off"`；不会回退到 RTX 5090 或其他本地 GPU。脚本通过 Slurm 正式申请资源。[UD Slurm 培训资料](https://docs.hpc.udel.edu/_media/training/slurm/introduction_to_slurm_october2024.pdf) · [Slurm sbatch 文档](https://slurm.schedmd.com/sbatch.html)
+`HPC_ENABLED`, `HPC_AUTHORIZED`, and `HPC_OPPORTUNISTIC` are disabled by default. Confirm account and workload authorization, an approved preemptible or low-priority scheduling mechanism, the account, partition, QoS, A100 GRES, filesystem, and driver with the administrator.
 
-1. 在私人设备运行 `python -m artcurator scheduler --dry-run`。此命令仅打印计划。
-2. 取得授权后，把代码、环境及已许可的权重放到管理员允许的位置。远端只需要 Python 基础包与模型环境。创建私有 `private/` 和 `weights/`，保持 OAuth、Gmail 和 Git 发布凭据在私人设备。SQLite 与文件锁需要支持 POSIX 锁的持久文件系统。
-3. 已根据报告的 Slurm 17.11.8 调整参数：使用 `--export=PATH=/usr/bin:/bin` 显式传递最小环境（该版本不支持 `NIL`），通过远端 `id -u` 和 `squeue --user` 查询本账号作业（不使用 `--me`）。保留 `--deadline`、`--no-requeue`。让管理员核实 `gpu:a100:1` 名称、A100 40GB 可见范围及分区/QoS 权限。Slurm 解析提交时间时使用提交主机时区，当前配置应与该主机一致。先核对 SSH host key，配置管理员允许的非交互式 SSH 路径。参数参照 [Slurm 17.11.8 sbatch 手册](https://github.com/SchedMD/slurm/blob/slurm-17-11-8-1/doc/man/man1/sbatch.1)和 [squeue 手册](https://github.com/SchedMD/slurm/blob/slurm-17-11-8-1/doc/man/man1/squeue.1)；已完成下述 Z-Image-Turbo 的真实 Slurm 提交和取回验收。
-4. 在私机填入 `HPC_HOST`、`HPC_ACCOUNT`、`HPC_PARTITION`、`HPC_QOS`、`HPC_REMOTE_ROOT`、`HPC_REMOTE_PYTHON`。Caviness 另设 `HPC_WORKGROUP` 为获授权工作组；SSH 命令会通过 `workgroup --command` 进入该组，包括提交、查询和取回作品。路径用远端绝对路径。确认后在私机设置三个 HPC 开关，保持 `scheduler.mode: slurm`，再使用 `scheduler` 或 `tick`。默认时间上限 `runtime_minutes: 30` 不能超过 30；作业为 `--gres=gpu:a100:1 --time=00:30:00`。
+The default is `scheduler.mode: slurm`. If no suitable configuration is available, keep the HPC switches disabled or set the scheduler mode to `"off"`. The application does not fall back to an RTX 5090 or another local GPU. All HPC allocations are requested through Slurm. [UD Slurm training](https://docs.hpc.udel.edu/_media/training/slurm/introduction_to_slurm_october2024.pdf) · [Slurm sbatch documentation](https://slurm.schedmd.com/sbatch.html)
 
-**CentOS 7 容器环境。** glibc 2.17 的宿主机不能直接使用许多现代 Python/CUDA wheels。可用 Apptainer 分离轻量控制环境和 GPU 模型环境：远端创建 `containers/`、`private/`，把 `config/hpc-runtime.env.example` 复制为 `private/runtime.env`（权限 600），填入 Apptainer、两个 SIF 镜像与镜像内 Python 的绝对路径。然后把私机 `HPC_REMOTE_PYTHON` 指向远端 `config/hpc-python.sh`，赋予脚本执行权限。远端也必须有项目根目录的 `config.yaml`。
+1. Run `python -m artcurator scheduler --dry-run` on the private device. This prints a plan without submitting it.
+2. After authorization, place the code, environment, and licensed weights in an approved location. The remote worker needs only the Python base dependencies and model environment. Create private `private/` and `weights/` directories. Keep OAuth, Gmail, and Git publishing credentials on the private device. SQLite and file locks require persistent storage with POSIX locking support.
+3. The adapter supports the reported Slurm 17.11.8 installation. It passes a minimal environment using `--export=PATH=/usr/bin:/bin` because that version does not support `NIL`. It resolves the remote user's UID with `id -u` and queries jobs with `squeue --user`, without using `--me`. It retains `--deadline` and `--no-requeue`. Confirm `gpu:a100:1`, available A100 variants, and partition/QoS permissions with the administrator. Slurm interprets submission times in the submission host's timezone; configure the scheduler to match. Verify the SSH host key and configure an approved noninteractive SSH connection. See the [Slurm 17.11.8 sbatch manual](https://github.com/SchedMD/slurm/blob/slurm-17-11-8-1/doc/man/man1/sbatch.1) and [squeue manual](https://github.com/SchedMD/slurm/blob/slurm-17-11-8-1/doc/man/man1/squeue.1). Real Slurm submission and result retrieval have been validated for the Z-Image-Turbo run described below.
+4. On the private device, configure `HPC_HOST`, `HPC_ACCOUNT`, `HPC_PARTITION`, `HPC_QOS`, `HPC_REMOTE_ROOT`, and `HPC_REMOTE_PYTHON`. For Caviness, also set `HPC_WORKGROUP` to the authorized workgroup. SSH commands enter that group through `workgroup --command` for submission, queries, and retrieval. Use absolute remote paths. Once the environment is approved and ready, enable all three HPC switches, retain `scheduler.mode: slurm`, and use `scheduler` or `tick`. `runtime_minutes: 30` is the default and cannot exceed 30. Jobs request `--gres=gpu:a100:1 --time=00:30:00`.
 
-若计算节点没有系统 `unsquashfs`，必须配置 `HPC_UNSQUASHFS` 为管理员安装的共享可执行文件。Caviness 当前路径为 `/opt/shared/squashfs-tools/4.6.1/bin/unsquashfs`。包装脚本会将其目录加入 Slurm 的最小 PATH；登录节点自带该命令不能证明计算节点也有它。首次真实启动曾因缺少此路径在模型加载前失败，已补上此配置和最小 PATH 回归测试。
+### CentOS 7 containers
 
-脚本在登录节点使用控制镜像，显式清空 `CUDA_VISIBLE_DEVICES`；在 Slurm 作业内要求分配的 GPU 标识，使用模型镜像、`--nv` 并保留 Slurm 的设备映射。只挂载项目目录，使用干净的环境，不传递 Gmail/OAuth 凭据。SIF 临时展开使用节点本地临时目录，避免共享 NFS 的清理问题。可先用官方 `python:3.12-slim-bookworm` 镜像创建 `.venv-control`，安装 `pip install -e .`；GPU 镜像需要独立安装已固定的模型依赖与缓存权重。控制容器的 Python 和 mock 测试通过不代表 A100 推理通过。完整测试还需要镜像包含 `git` 和 `ps`，轻量控制镜像默认没有这两个命令。
+Many modern Python/CUDA wheels cannot run directly on a host with glibc 2.17. Apptainer separates the lightweight control environment from the GPU model environment:
 
-容器不能替换宿主 GPU 驱动。须取得 **A100 计算节点的实际驱动版本**，再选择 CUDA/PyTorch/vLLM 组合；VALET 中 CUDA toolkit 的版本不能代替此信息。兼容性检查也必须经 Slurm 申请，计入当日一次任务额度。不要在登录节点安装系统 glibc、启动推理或常驻轮询。[Apptainer GPU 要求](https://apptainer.org/docs/user/latest/gpu.html)
+- Create remote `containers/` and `private/` directories.
+- Copy `config/hpc-runtime.env.example` to `private/runtime.env`, with permissions set to 600.
+- Configure absolute paths for Apptainer, the SIF images, and their Python interpreters.
+- Make `config/hpc-python.sh` executable and point the private scheduler's `HPC_REMOTE_PYTHON` to its absolute remote path.
+- Include `config.yaml` in the remote project root.
 
-已在获授权的单卡 A100 Slurm 检查中读到驱动 `550.54.15`。对此环境先准备 Z-Image-Turbo 备用环境，避免直接使用 FLUX 官方默认 CUDA 13 安装路径。下面两步在容器内的独立 `.venv-zimage` 中执行；先安装官方 CUDA 12.4 PyTorch wheel，再约束其余包。Python 3.12 中的包依赖检查和 `ZImagePipeline` 导入已通过。2026-11-22 已在真实单张 **A100 80GB PCIe** 上以 BF16、CPU offload、9 steps、1024×1024 生成并取回 8 张候选，作业正常结束且 Slurm 清理步骤完成。A100 40GB、FLUX 推理与显存峰值仍未实测。[PyTorch 官方历史版本](https://pytorch.org/get-started/previous-versions/) · [NVIDIA 驱动兼容表](https://docs.nvidia.com/deploy/cuda-compatibility/minor-version-compatibility.html)
+If compute nodes lack a system `unsquashfs`, set `HPC_UNSQUASHFS` to the administrator-installed shared executable. The current Caviness path is `/opt/shared/squashfs-tools/4.6.1/bin/unsquashfs`. The wrapper adds that directory to Slurm's minimal PATH. A tool present on the login node may be absent from compute nodes; this caused an initial startup failure before model loading and is covered by a regression test.
+
+On login nodes, the wrapper uses the control image and clears `CUDA_VISIBLE_DEVICES`. Inside a Slurm job, it requires an allocated GPU identifier, selects the model environment, enables `--nv`, and preserves Slurm's device mapping. It uses a clean environment, binds the project directory and job scratch when available, and does not pass Gmail/OAuth credentials. Temporary SIF extraction uses node-local storage to avoid NFS cleanup problems.
+
+The official `python:3.12-slim-bookworm` image can host `.venv-control` with `pip install -e .`. Install the pinned model dependencies and cached weights separately for the GPU environment. Passing control-container or mock tests does not prove A100 inference works. The full test suite also requires `git` and `ps`, which are absent from the minimal control image.
+
+A container cannot replace the host GPU driver. Obtain the **actual driver version on the A100 compute node** before selecting CUDA, PyTorch, and vLLM versions. A CUDA toolkit version listed by VALET is not a substitute. Compatibility probes must also use Slurm and count toward the daily attempt limit. Do not install system glibc, run inference, or keep a polling service on a login node. [Apptainer GPU requirements](https://apptainer.org/docs/user/latest/gpu.html)
+
+### Validated CUDA 12.4 fallback
+
+An authorized single-A100 Slurm probe reported driver `550.54.15`. For that environment, use Z-Image-Turbo with CUDA 12.4 rather than the official FLUX default CUDA 13 installation path. Run the following commands inside the container's separate `.venv-zimage`, installing the official PyTorch wheel before the constrained dependencies:
 
 ```bash
 python -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
@@ -91,47 +119,61 @@ python -m pip install -e . -r requirements-diffusers.txt -c config/caviness-zima
 python -m pip check
 ```
 
-使用此备用环境时，在私人调度器设置 `ART_BACKEND=diffusers`，并把 `HPC_GPU_PYTHON` 指向远端 `.venv-zimage/bin/python`。可以沿用已验证的 Python SIF：CUDA runtime 随 PyTorch wheel 安装，GPU 作业仍须由 `--nv` 接入宿主驱动。模型、Hugging Face 与 CUDA 编译缓存都写入项目私有目录，不依赖容器中的默认 home。
+Dependency checks and `ZImagePipeline` imports passed under Python 3.12. On **November 22, 2026**, a real **single A100 80GB PCIe** generated eight 1024×1024 candidates using BF16, CPU offload, and nine steps. All images were retrieved successfully, and the job and Slurm cleanup steps completed. A100 40GB inference, FLUX inference, and peak GPU memory remain unmeasured. [Official PyTorch versions](https://pytorch.org/get-started/previous-versions/) · [NVIDIA driver compatibility](https://docs.nvidia.com/deploy/cuda-compatibility/minor-version-compatibility.html)
 
-每个本地日期共享一条 SQLite 调度记录，每天最多调用一次真实 `sbatch`，累计 GPU 运行时间不超过 30 分钟。默认请求一张 A100、30 分钟墙钟和约 10 分钟排队准入窗口。若接近午夜，调度器收紧窗口。等待资源失败时当日作废，并在后续状态检查中取消超期作业。抢占后不自动重新入队。私机发出短时 SSH 命令记录状态，并在作业退出后拉取已完成的候选。无需在登录节点保持轮询进程。
+Set `ART_BACKEND=diffusers` on the private scheduler and `HPC_GPU_PYTHON` to the remote `.venv-zimage/bin/python`. The validated Python SIF can be reused: the PyTorch wheel supplies the CUDA runtime, while GPU jobs access the host driver through `--nv`. Model, Hugging Face, and CUDA compilation caches remain under the private project directories rather than relying on the container's default home directory.
 
-GPU 验证要求恰好一张完整 A100，兼容 40 GB 和 80 GB 版本，拒绝多卡、其他型号及 MIG 切片。日志会输出实际型号、显存和可见卡数；不能仅从 `gpu:a100` GRES 推断具体显存容量。所有兼容路径保持 BF16。
+### Daily limits and resource release
 
-**释放 GPU。** 正常完成、超时、抢占或异常退出时，worker 会保存已完成作品、丢弃模型引用并尽力释放本进程的 PyTorch 空闲缓存。Prompt Upsampler 使用独立进程组，父进程在所有退出路径回收该组，避免残留 vLLM 子进程。worker 退出释放 CUDA context，Slurm 负责收回作业分配；强制终止时由 Slurm 清理作业进程。不会重置 GPU、终止其他用户进程或删除权重缓存。`empty_cache()` 只释放未使用的缓存，不能替代进程退出，也不保证共享节点的总显存使用率归零。此清理路径有模拟 CUDA 与真实 CPU 子进程测试；Z-Image-Turbo 在 A100 80GB 上正常完成后，已确认 Slurm 作业和 extern 清理步骤结束、作业离开队列。真实抢占、强制超时及 FLUX/vLLM 子进程清理仍需目标环境验收。
+One SQLite schedule record is shared by all attempts for a local calendar date. Normal scheduling invokes real `sbatch` at most once per day, with a maximum cumulative GPU runtime of 30 minutes. The default request is one A100, a 30-minute wall-clock limit, and approximately ten minutes for queue admission. The scheduler shortens the window near midnight, skips an unsuccessful day, and cancels expired jobs during subsequent reconciliation. Preempted jobs are not automatically requeued.
 
-**恢复。** 按图保存的检查点包括 Prompt、PNG、种子和原始生成时间。恢复从未完成编号继续，单张推理中间的扩散状态会重新计算。默认将抢占时已保存的部分候选送审。使用分开的 `scheduler`、`send-email` 命令可以先保留未送审批次，在之后一个日期的唯一配额内执行 `python -m artcurator scheduler --resume YYYY-MM-DD` 恢复 Slurm 批次，或用 `python -m artcurator generate --resume --day YYYY-MM-DD` 恢复本地批次。已投递批次的编号和内容冻结。主机中断导致提交结果不明时，按唯一 JobName 对账。无资源而跳过的日批次不会自动补跑。
+The private device makes short SSH calls to reconcile state and retrieves completed candidates after the job exits. No persistent polling process is needed on the login node.
 
-生产模式请使用 `scheduler` 或 `tick`，不要在 login node 上执行 `generate`。`generate` 的本地真实生图仅在显式设置 `scheduler.mode: local` 后可用；本地 mock 演示仍可运行。
+GPU validation requires exactly one full A100, accepting both 40GB and 80GB variants while rejecting multiple visible GPUs, other models, and MIG slices. Logs report the actual GPU name, memory, and visible device count. The `gpu:a100` GRES alone does not identify memory capacity. Both supported variants use BF16.
 
-## Gmail OAuth 和审批
+**GPU cleanup.** On normal completion, timeout, preemption, or failure, the worker preserves completed images, drops model references, and attempts to release its unused PyTorch GPU cache. The Prompt Upsampler runs in a separate process group; the parent cleans up that group on every exit path to prevent orphaned vLLM workers. Process exit releases the CUDA context, and Slurm reclaims the allocation. Slurm also cleans up job processes after forced termination.
 
-在私人设备上运行 `python -m pip install -e '.[gmail]'`。使用专用 Gmail 发件账号，避免让 OAuth 访问日常主邮箱。发件账号和批准账号必须是不同邮箱。
+The application does not reset GPUs, terminate other users' processes, or delete cached weights. `empty_cache()` only releases unused cached memory; it does not replace process exit or guarantee that a shared node's total GPU memory usage becomes zero. Cleanup has mock CUDA and real CPU subprocess tests. Following the successful Z-Image-Turbo run on an A100 80GB, the Slurm job and extern cleanup step completed and the job left the queue. Real preemption, forced timeout, and FLUX/vLLM subprocess cleanup still require validation on the target environment.
 
-1. 在 Google Cloud 项目启用 Gmail API。配置 OAuth consent screen 并按 Workspace 政策添加测试用户或选择内部应用。
-2. 创建 **Desktop app** OAuth client。保存 JSON 到 `private/oauth-client.json`，仅私有设备可读。在本机 `.env` 配置 `GMAIL_ENABLED=true`、`GMAIL_SENDER`、`GMAIL_RECIPIENT`、`GMAIL_APPROVER`。最后一项省略时等于收件地址。可显式指定 `GMAIL_CLIENT_SECRET` 和 `GMAIL_TOKEN`。
-3. 在可访问本机浏览器的环境中运行 `python -m artcurator gmail-auth`，选择发件账号授权。OAuth 回调绑定本机，刷新令牌私下落盘。外部测试应用可能需要按 Google 的测试策略定期重新授权。
-4. 先检查 `python -m artcurator preview-email --latest`。在批准真实发送后，运行 `python -m artcurator send-email --latest`。用已配置的发件人地址直接回复收到的原始会话，独立一行写 `APPROVE: 01, 03, 04`、`APPROVE: ALL` 或 `SKIP`。然后运行 `python -m artcurator check-replies`。
+**Resume.** Per-image checkpoints preserve prompts, PNG files, seeds, and original generation timestamps. Resuming continues from unfinished image numbers; an interrupted image's diffusion steps are recomputed. By default, candidates saved before preemption can be sent for approval.
 
-请求范围为 `gmail.send` 和 `gmail.readonly`。后者读取指定会话正文以及在 Sent 中对账。审批检查精确 From、Gmail 的 DMARC 对齐、会话 ID、原始 Message-ID 中的批次和随机值，以及 In-Reply-To、References 和编号。邮件引用和转发不触发批准。默认只读取过去 30 天仍未决定的已发送会话。已明确拒绝的发送有次数上限。网络失败导致接受状态不明时，下次运行只查找 Sent，等待确认以避免重复发送。可用 `status` 查看结果。首次真实联调需要验证选用邮箱的 DMARC 头和回复客户端保留的引用头。[Gmail API scopes](https://developers.google.com/workspace/gmail/api/auth/scopes) · [Gmail threads](https://developers.google.com/workspace/gmail/api/guides/threads)
+To retain a partial batch before sending it, run `scheduler` and `send-email` separately. On a later date, use that day's single allocation with `python -m artcurator scheduler --resume YYYY-MM-DD` to resume a Slurm batch, or `python -m artcurator generate --resume --day YYYY-MM-DD` for a local batch. Delivered batches have immutable contents and numbering. If a connection fails after submission and acceptance is uncertain, reconcile using the unique job name. Days skipped for lack of resources are not automatically carried forward.
 
-## GitHub Pages 与定时执行
+Use `scheduler` or `tick` for production. Do not run `generate` on a login node. Local real-GPU generation requires an explicit `scheduler.mode: local` configuration; local mock demos remain available.
 
-在你准备公开画廊时，手动创建或选定有 GitHub Pages 权限的仓库。该版本要求发布分支为 `main`，更改时需要同时修改 `config.yaml` 和工作流分支过滤条件。项目初始工作目录没有 Git 历史，若将代码放进已有仓库，保留该仓库的历史。
+## Gmail OAuth and human approval
 
-1. 检查并提交项目源文件和初始空清单。保持 `private/`、`work/`、`.env`、权重及 OAuth 数据在 Git 之外。
-2. 在 GitHub 的 **Settings → Pages → Build and deployment** 选择 **GitHub Actions**。由你授权并完成首次 push。工作流在 Ubuntu 上执行 Python 测试、TypeScript 和 Vite 构建、桌面和移动 Chromium 测试。通过后将 `web/dist` 交给 Pages。作品详情使用 hash 路由，兼容 Pages 子路径。[GitHub Pages 自定义工作流](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)
-3. 在私机设置专用发布 checkout，配置限于此仓库的 Git 凭据、Git 提交身份和 `origin`。用 `python -m artcurator publish --approved-only` 先检查本地发布清单。授权自动推送后在私机设置 `GIT_PUSH_ENABLED=true`。此时 `python -m artcurator publish --approved-only --push` 仅分阶段提交批准原图、缩略图和清单，并推送分支。远端领先、暂存区有文件或本地存在无关提交时需要先人工处理。
-4. 安装 `config/cron.example` 中的私机定时任务。修改绝对路径后加入私机 crontab。先运行一次 `python -m artcurator tick` 做已授权的端到端验收。它分别处理每日生成、Gmail 投递及检查、清单更新与可选推送。也可分别调度子命令。macOS 可用 launchd；Windows 建议在 WSL2 内调度。
+Install the Gmail dependencies on the private device with `python -m pip install -e '.[gmail]'`. Use a dedicated Gmail sending account so OAuth does not need access to your everyday mailbox. The sending and approving accounts must be different addresses.
 
-本地存储适配器保存不可变 PNG 和 WebP 缩略图，最后原子替换 manifest。失败后重跑会补齐同一作品的缺失文件。CI 检查 manifest 与公开的每个图片是否一一对应。随着库增长，可以按 `FilesystemGallery.put()` 的契约引入对象存储并同步调整构建校验及前端资源路径。MVP 使用 GitHub Pages 的静态文件。
+1. Enable the Gmail API in a Google Cloud project. Configure the OAuth consent screen and add test users or select an internal application according to your Workspace policy.
+2. Create a **Desktop app** OAuth client. Save the JSON file as `private/oauth-client.json`, readable only on the private device. Configure `GMAIL_ENABLED=true`, `GMAIL_SENDER`, `GMAIL_RECIPIENT`, and `GMAIL_APPROVER` in the local `.env`. The approver defaults to the recipient if omitted. Override credential paths with `GMAIL_CLIENT_SECRET` and `GMAIL_TOKEN` if needed.
+3. Run `python -m artcurator gmail-auth` where a local browser is available and authorize the sending account. The OAuth callback binds locally, and the refresh token is stored privately. External applications in testing mode may need periodic reauthorization under Google's testing policies.
+4. Inspect `python -m artcurator preview-email --latest`. After authorizing real sending, run `python -m artcurator send-email --latest`. Reply directly to the original conversation from the configured approving address, using a standalone line containing `APPROVE: 01, 03, 04`, `APPROVE: ALL`, or `SKIP`. Then run `python -m artcurator check-replies`.
 
-## 策展与偏好
+The requested scopes are `gmail.send` and `gmail.readonly`. Read access is used to inspect the designated conversations and reconcile messages in Sent. Approval validation checks the exact sender, Gmail's DMARC alignment, thread ID, the batch and random token embedded in the original Message-ID, `In-Reply-To`, `References`, and image numbers. Quoted history and forwarded messages do not trigger approval.
 
-内置 12 个主题库、12 种色彩组合和构图候选，避开上一批所用的主题与配色组合。SQLite 保存作品和编号、Prompt、种子、分辨率、模型等字段。生成端使用 SHA-256 和 dHash 去重，并剔除异常尺寸、过暗、过亮或低对比度图片。可选 `aesthetic_score` 是基于对比度及亮度的可解释启发式，仅作记录。人类审批决定作品能否发布。
+By default, only undecided conversations sent within the last 30 days are checked. Explicit send rejections have bounded retries. If a network failure leaves message acceptance uncertain, the next run searches Sent instead of resending, avoiding duplicate mail. Inspect the outcome with `status`. Real integration testing must verify DMARC headers and the reply client's preservation of threading headers. [Gmail API scopes](https://developers.google.com/workspace/gmail/api/auth/scopes) · [Gmail threads](https://developers.google.com/workspace/gmail/api/guides/threads)
 
-偏好引擎用最近的批准和曝光记录计算主题、色彩、构图及风格权重，并轻量提高已批准 Prompt 关键词的权重。审批快照也记录模型、Seed 和时间。模型选择由配置决定。默认保留 30% 的随机探索。画廊支持主题和月份筛选、Masonry、详情、原图、下载及浏览器内收藏。每月精选以当月最新批准的作品为基础，本地收藏优先。
+## GitHub Pages and scheduled operation
 
-## 验证
+When ready to publish, create or select a repository with GitHub Pages access. This version uses `main` as the publishing branch. Changing it requires updates to both `config.yaml` and the workflow's branch filters. Preserve existing Git history when adopting the project in another repository.
+
+1. Review and commit the source code and initially empty gallery manifest. Keep `private/`, `work/`, `.env`, weights, and OAuth data out of Git.
+2. In GitHub, select **Settings → Pages → Build and deployment → GitHub Actions**. Authorize and perform the initial push. The Ubuntu workflow runs Python tests, TypeScript/Vite builds, and desktop/mobile Chromium tests, then deploys `web/dist` to Pages. Artwork details use hash routing for compatibility with Pages subpaths. [GitHub Pages custom workflows](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)
+3. Set up a dedicated publishing checkout on the private device, with repository-scoped Git credentials, a commit identity, and `origin`. Use `python -m artcurator publish --approved-only` to prepare the local public manifest. After authorizing automatic pushes, set `GIT_PUSH_ENABLED=true`. Then `python -m artcurator publish --approved-only --push` stages and commits only approved originals, thumbnails, and the manifest before pushing. A remote branch ahead of the checkout, existing staged changes, or unrelated local commits require manual resolution.
+4. Adapt the absolute paths in `config/cron.example` and install the schedule in the private device's crontab. First run `python -m artcurator tick` for an authorized end-to-end check. It handles daily generation, Gmail delivery and reply checks, manifest updates, and optional pushing as separate operations. Individual commands can also be scheduled separately. macOS users can use launchd; WSL2 is recommended on Windows.
+
+The filesystem storage adapter writes immutable PNG originals and WebP thumbnails before atomically replacing the manifest. Rerunning publication repairs missing files for the same artwork without duplicating it. CI verifies that public image files and manifest entries match. If the collection outgrows Git storage, implement the `FilesystemGallery.put()` contract using object storage and update frontend asset paths and build validation accordingly. The MVP uses static files on GitHub Pages.
+
+## Curation and preference learning
+
+The prompt library contains 12 themes, 12 color palettes, and composition variations, avoiding theme/palette combinations from the previous batch. SQLite records artwork IDs and numbers, prompts, seeds, resolutions, models, and other metadata. Generation uses SHA-256 and dHash for deduplication and rejects incorrect dimensions, excessively dark or bright images, and low contrast. Optional `aesthetic_score` values are explainable brightness/contrast heuristics for reference only. Human approval determines publication.
+
+The preference engine uses recent approvals and exposures to weight themes, palettes, compositions, and styles, with a small boost for keywords in approved prompts. Approval snapshots also record the model, seed, and selection time. Model selection remains configuration-driven. The default exploration rate is 30%.
+
+The gallery supports theme and month filters, a masonry layout, artwork details, original images, downloads, and browser-local favorites. Monthly selections are based on the latest approved works for that month, prioritizing local favorites.
+
+## Validation
 
 ```bash
 python -m pytest
@@ -141,9 +183,11 @@ bash -n config/slurm.sbatch
 (cd web && npx playwright install chromium && npm run test:e2e)
 ```
 
-测试覆盖设备不可用、同日去重、Slurm 授权和超时、抢占后同步与恢复、MIME、错误邮箱和会话、批次隔离、回复和发布幂等，以及本地裸 Git 仓库的提交与推送。Playwright 使用隔离的模拟产物和生产空清单测试桌面与手机。已完成 Caviness 单张 A100 80GB 上的 Z-Image-Turbo 真实生图、SSH 取回、私有邮件预览，以及 GitHub Pages 构建与部署验收。CI 和 mock 测试不替代真实 GPU 验收；FLUX、A100 40GB、真实抢占/超时和 Gmail OAuth 发送仍需验证。候选作品尚未获批准，未加入公开清单。
+Automated tests cover unavailable devices, daily deduplication, Slurm authorization and deadlines, synchronization and resume after preemption, MIME generation, invalid senders and threads, batch isolation, idempotent replies and publication, and commits/pushes against a local bare Git repository. Playwright tests desktop and mobile layouts using isolated mock artifacts and the empty production manifest.
 
-## 项目文件结构
+Real validation has completed for Z-Image-Turbo generation on one Caviness A100 80GB, SSH result retrieval, private email preview generation, and GitHub Pages build/deployment. CI and mock tests do not substitute for real GPU validation. FLUX, A100 40GB, actual preemption/forced timeout, and Gmail OAuth sending still require validation. Generated candidates have not been approved and are absent from the public manifest.
+
+## Project structure
 
 ```text
 .
@@ -156,10 +200,13 @@ bash -n config/slurm.sbatch
 ├── requirements-flux.txt
 ├── requirements-diffusers.txt
 ├── config/
+│   ├── caviness-zimage-constraints.txt
 │   ├── cron.example
 │   ├── demo.sh
 │   ├── demo.yaml
 │   ├── e2e.sh
+│   ├── hpc-python.sh
+│   ├── hpc-runtime.env.example
 │   └── slurm.sbatch
 ├── artcurator/
 │   ├── __init__.py
@@ -167,11 +214,17 @@ bash -n config/slurm.sbatch
 │   ├── settings.py
 │   ├── store.py
 │   ├── curator/{__init__,publish}.py
-│   ├── generator/{__init__,backends,flux,plan,worker}.py
+│   ├── generator/{__init__,backends,flux,plan,resources,worker}.py
 │   ├── mailer/{__init__,format,replies,service,transport}.py
 │   ├── preference_engine/{__init__,engine}.py
 │   └── scheduler/{__init__,service,slurm}.py
-├── tests/{conftest,test_generation_scheduler,test_mail_publish}.py
+├── tests/
+│   ├── conftest.py
+│   ├── test_generation_scheduler.py
+│   ├── test_gpu_allocation.py
+│   ├── test_hpc_container.py
+│   ├── test_mail_publish.py
+│   └── test_resources.py
 └── web/
     ├── e2e/museum.spec.ts
     ├── index.html
