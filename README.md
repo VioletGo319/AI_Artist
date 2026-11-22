@@ -72,7 +72,7 @@ hf download Tongyi-MAI/Z-Image-Turbo --local-dir weights/diffusers/Tongyi-MAI/Z-
 
 1. 在私人设备运行 `python -m artcurator scheduler --dry-run`。此命令仅打印计划。
 2. 取得授权后，把代码、环境及已许可的权重放到管理员允许的位置。远端只需要 Python 基础包与模型环境。创建私有 `private/` 和 `weights/`，保持 OAuth、Gmail 和 Git 发布凭据在私人设备。SQLite 与文件锁需要支持 POSIX 锁的持久文件系统。
-3. 已根据报告的 Slurm 17.11.8 调整参数：使用 `--export=PATH=/usr/bin:/bin` 显式传递最小环境（该版本不支持 `NIL`），通过远端 `id -u` 和 `squeue --user` 查询本账号作业（不使用 `--me`）。保留 `--deadline`、`--no-requeue`。让管理员核实 `gpu:a100:1` 名称、A100 40GB 可见范围及分区/QoS 权限。Slurm 解析提交时间时使用提交主机时区，当前配置应与该主机一致。先核对 SSH host key，配置管理员允许的非交互式 SSH 路径。参数参照 [Slurm 17.11.8 sbatch 手册](https://github.com/SchedMD/slurm/blob/slurm-17-11-8-1/doc/man/man1/sbatch.1)和 [squeue 手册](https://github.com/SchedMD/slurm/blob/slurm-17-11-8-1/doc/man/man1/squeue.1)；尚未完成真实集群作业验证。
+3. 已根据报告的 Slurm 17.11.8 调整参数：使用 `--export=PATH=/usr/bin:/bin` 显式传递最小环境（该版本不支持 `NIL`），通过远端 `id -u` 和 `squeue --user` 查询本账号作业（不使用 `--me`）。保留 `--deadline`、`--no-requeue`。让管理员核实 `gpu:a100:1` 名称、A100 40GB 可见范围及分区/QoS 权限。Slurm 解析提交时间时使用提交主机时区，当前配置应与该主机一致。先核对 SSH host key，配置管理员允许的非交互式 SSH 路径。参数参照 [Slurm 17.11.8 sbatch 手册](https://github.com/SchedMD/slurm/blob/slurm-17-11-8-1/doc/man/man1/sbatch.1)和 [squeue 手册](https://github.com/SchedMD/slurm/blob/slurm-17-11-8-1/doc/man/man1/squeue.1)；已完成下述 Z-Image-Turbo 的真实 Slurm 提交和取回验收。
 4. 在私机填入 `HPC_HOST`、`HPC_ACCOUNT`、`HPC_PARTITION`、`HPC_QOS`、`HPC_REMOTE_ROOT`、`HPC_REMOTE_PYTHON`。Caviness 另设 `HPC_WORKGROUP` 为获授权工作组；SSH 命令会通过 `workgroup --command` 进入该组，包括提交、查询和取回作品。路径用远端绝对路径。确认后在私机设置三个 HPC 开关，保持 `scheduler.mode: slurm`，再使用 `scheduler` 或 `tick`。默认时间上限 `runtime_minutes: 30` 不能超过 30；作业为 `--gres=gpu:a100:1 --time=00:30:00`。
 
 **CentOS 7 容器环境。** glibc 2.17 的宿主机不能直接使用许多现代 Python/CUDA wheels。可用 Apptainer 分离轻量控制环境和 GPU 模型环境：远端创建 `containers/`、`private/`，把 `config/hpc-runtime.env.example` 复制为 `private/runtime.env`（权限 600），填入 Apptainer、两个 SIF 镜像与镜像内 Python 的绝对路径。然后把私机 `HPC_REMOTE_PYTHON` 指向远端 `config/hpc-python.sh`，赋予脚本执行权限。远端也必须有项目根目录的 `config.yaml`。
@@ -83,7 +83,7 @@ hf download Tongyi-MAI/Z-Image-Turbo --local-dir weights/diffusers/Tongyi-MAI/Z-
 
 容器不能替换宿主 GPU 驱动。须取得 **A100 计算节点的实际驱动版本**，再选择 CUDA/PyTorch/vLLM 组合；VALET 中 CUDA toolkit 的版本不能代替此信息。兼容性检查也必须经 Slurm 申请，计入当日一次任务额度。不要在登录节点安装系统 glibc、启动推理或常驻轮询。[Apptainer GPU 要求](https://apptainer.org/docs/user/latest/gpu.html)
 
-已在获授权的单卡 A100 Slurm 检查中读到驱动 `550.54.15`。对此环境先准备 Z-Image-Turbo 备用环境，避免直接使用 FLUX 官方默认 CUDA 13 安装路径。下面两步在容器内的独立 `.venv-zimage` 中执行；先安装官方 CUDA 12.4 PyTorch wheel，再约束其余包。Python 3.12 中的包依赖检查和 `ZImagePipeline` 导入已通过，**真实 A100 推理与显存峰值尚待验证**。[PyTorch 官方历史版本](https://pytorch.org/get-started/previous-versions/) · [NVIDIA 驱动兼容表](https://docs.nvidia.com/deploy/cuda-compatibility/minor-version-compatibility.html)
+已在获授权的单卡 A100 Slurm 检查中读到驱动 `550.54.15`。对此环境先准备 Z-Image-Turbo 备用环境，避免直接使用 FLUX 官方默认 CUDA 13 安装路径。下面两步在容器内的独立 `.venv-zimage` 中执行；先安装官方 CUDA 12.4 PyTorch wheel，再约束其余包。Python 3.12 中的包依赖检查和 `ZImagePipeline` 导入已通过。2026-11-22 已在真实单张 **A100 80GB PCIe** 上以 BF16、CPU offload、9 steps、1024×1024 生成并取回 8 张候选，作业正常结束且 Slurm 清理步骤完成。A100 40GB、FLUX 推理与显存峰值仍未实测。[PyTorch 官方历史版本](https://pytorch.org/get-started/previous-versions/) · [NVIDIA 驱动兼容表](https://docs.nvidia.com/deploy/cuda-compatibility/minor-version-compatibility.html)
 
 ```bash
 python -m pip install torch==2.6.0 --index-url https://download.pytorch.org/whl/cu124
@@ -97,7 +97,7 @@ python -m pip check
 
 GPU 验证要求恰好一张完整 A100，兼容 40 GB 和 80 GB 版本，拒绝多卡、其他型号及 MIG 切片。日志会输出实际型号、显存和可见卡数；不能仅从 `gpu:a100` GRES 推断具体显存容量。所有兼容路径保持 BF16。
 
-**释放 GPU。** 正常完成、超时、抢占或异常退出时，worker 会保存已完成作品、丢弃模型引用并尽力释放本进程的 PyTorch 空闲缓存。Prompt Upsampler 使用独立进程组，父进程在所有退出路径回收该组，避免残留 vLLM 子进程。worker 退出释放 CUDA context，Slurm 负责收回作业分配；强制终止时由 Slurm 清理作业进程。不会重置 GPU、终止其他用户进程或删除权重缓存。`empty_cache()` 只释放未使用的缓存，不能替代进程退出，也不保证共享节点的总显存使用率归零。此清理路径有模拟 CUDA 与真实 CPU 子进程测试，尚未完成真实 A100 验证。
+**释放 GPU。** 正常完成、超时、抢占或异常退出时，worker 会保存已完成作品、丢弃模型引用并尽力释放本进程的 PyTorch 空闲缓存。Prompt Upsampler 使用独立进程组，父进程在所有退出路径回收该组，避免残留 vLLM 子进程。worker 退出释放 CUDA context，Slurm 负责收回作业分配；强制终止时由 Slurm 清理作业进程。不会重置 GPU、终止其他用户进程或删除权重缓存。`empty_cache()` 只释放未使用的缓存，不能替代进程退出，也不保证共享节点的总显存使用率归零。此清理路径有模拟 CUDA 与真实 CPU 子进程测试；Z-Image-Turbo 在 A100 80GB 上正常完成后，已确认 Slurm 作业和 extern 清理步骤结束、作业离开队列。真实抢占、强制超时及 FLUX/vLLM 子进程清理仍需目标环境验收。
 
 **恢复。** 按图保存的检查点包括 Prompt、PNG、种子和原始生成时间。恢复从未完成编号继续，单张推理中间的扩散状态会重新计算。默认将抢占时已保存的部分候选送审。使用分开的 `scheduler`、`send-email` 命令可以先保留未送审批次，在之后一个日期的唯一配额内执行 `python -m artcurator scheduler --resume YYYY-MM-DD` 恢复 Slurm 批次，或用 `python -m artcurator generate --resume --day YYYY-MM-DD` 恢复本地批次。已投递批次的编号和内容冻结。主机中断导致提交结果不明时，按唯一 JobName 对账。无资源而跳过的日批次不会自动补跑。
 
@@ -141,7 +141,7 @@ bash -n config/slurm.sbatch
 (cd web && npx playwright install chromium && npm run test:e2e)
 ```
 
-测试覆盖设备不可用、同日去重、Slurm 授权和超时、抢占后同步与恢复、MIME、错误邮箱和会话、批次隔离、回复和发布幂等，以及本地裸 Git 仓库的提交与推送。Playwright 使用隔离的模拟产物和生产空清单测试桌面与手机。真实 CUDA、生图、Caviness 提交、Gmail OAuth 发送和 GitHub Pages 云端部署都需要目标环境验收。
+测试覆盖设备不可用、同日去重、Slurm 授权和超时、抢占后同步与恢复、MIME、错误邮箱和会话、批次隔离、回复和发布幂等，以及本地裸 Git 仓库的提交与推送。Playwright 使用隔离的模拟产物和生产空清单测试桌面与手机。已完成 Caviness 单张 A100 80GB 上的 Z-Image-Turbo 真实生图、SSH 取回、私有邮件预览，以及 GitHub Pages 构建与部署验收。CI 和 mock 测试不替代真实 GPU 验收；FLUX、A100 40GB、真实抢占/超时和 Gmail OAuth 发送仍需验证。候选作品尚未获批准，未加入公开清单。
 
 ## 项目文件结构
 
