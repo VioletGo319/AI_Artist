@@ -1,0 +1,31 @@
+timezone: America/New_York
+generation:
+  backend: flux3
+  count: 8
+  aspect_ratios: ["1:1"]
+  cpu_offload: true
+  upsampler_memory: 0.86
+  duplicate_distance: 3
+  aesthetic_score: false
+  diffusers_model: Tongyi-MAI/Z-Image-Turbo
+  diffusers_steps: 9
+  diffusers_guidance: 0.0
+  # Set a repository approval only when overriding the Apache-2.0 default.
+  diffusers_license_approved: false
+preference:
+  exploration: 0.30
+scheduler:
+  mode: local
+  start_hour: 8
+  runtime_minutes: 120
+  admission_minutes: 10
+  cpus: 8
+  memory: 64G
+mail:
+  retries: 3
+  reply_days: 30
+  # Only turn off for a documented private transport with equivalent authentication.
+  require_dmarc: true
+publish:
+  remote: origin
+  branch: main

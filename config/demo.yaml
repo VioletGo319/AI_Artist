@@ -1,0 +1,5 @@
+generation:
+  backend: mock
+  aspect_ratios: ["3:2", "1:1", "9:16", "16:9"]
+scheduler:
+  mode: "off"

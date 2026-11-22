@@ -1,0 +1,3 @@
+# Install on an authorized private Linux host after live smoke tests.
+# Use absolute paths. The program applies config.yaml's timezone/start hour itself.
+*/10 * * * * cd /srv/ai-art-curator && /srv/ai-art-curator/.venv/bin/python -m artcurator tick >> /srv/ai-art-curator/private/cron.log 2>&1
