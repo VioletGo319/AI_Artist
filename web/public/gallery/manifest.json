@@ -1,4 +1,24 @@
 {
   "version": 1,
-  "artworks": []
+  "artworks": [
+    {
+      "id": "e8361721bfdc466394ebfd61b13b9069-05",
+      "title": "Vessels of Morning",
+      "theme": "Macro Photography",
+      "palette": "lapis and ice blue",
+      "composition": "centered silhouette with generous negative space",
+      "style": "macro photography",
+      "prompt": "Tiny droplets suspended in the branching veins of a leaf. Macro photography using lapis and ice blue, centered silhouette with generous negative space, a restrained highlight bloom and sharply resolved surfaces.",
+      "seed": 2800027904,
+      "model": "Tongyi-MAI/Z-Image-Turbo",
+      "date": "2026-11-22",
+      "generated_at": "2026-11-22T09:05:22.270968+00:00",
+      "steps": 9,
+      "width": 1024,
+      "height": 1024,
+      "approved_at": "2026-11-22T10:30:18+00:00",
+      "image": "gallery/art/e8361721bfdc466394ebfd61b13b9069-05.png",
+      "thumb": "gallery/thumbs/e8361721bfdc466394ebfd61b13b9069-05.webp"
+    }
+  ]
 }
