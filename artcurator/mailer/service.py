@@ -151,7 +151,7 @@ def check(store, env, mock, transport=None):
             available = {item["slot"]: item for item in store.artworks(delivery["batch"])}
             after = int(datetime.fromisoformat(delivery["sent_at"]).timestamp() * 1000)
             # Sort by Gmail's receipt time so the first valid reply closes the batch.
-            for identity, thread, timestamp, mail, authenticated_sender in sorted(
+            for identity, thread, timestamp, mail, authenticated_sender, original_message_id in sorted(
                     transport.replies(delivery), key=lambda row: (row[2], row[0])):
                 with store.connect() as db:
                     if db.execute("SELECT 1 FROM replies WHERE id=?", (identity,)).fetchone():
@@ -159,7 +159,8 @@ def check(store, env, mock, transport=None):
                 try:
                     valid = (thread == delivery["thread"] and timestamp >= after
                              and validate_reply(mail, delivery, medium, env.settings.mail.require_dmarc,
-                                                authenticated_sender=authenticated_sender))
+                                                authenticated_sender=authenticated_sender,
+                                                original_message_id=original_message_id))
                     command = parse_command(fresh_content(mail), set(available)) if valid else None
                 except (ValueError, LookupError, TypeError, AttributeError):
                     command = None

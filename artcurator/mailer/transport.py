@@ -2,6 +2,7 @@ from base64 import urlsafe_b64decode, urlsafe_b64encode
 from email import policy
 from email.parser import BytesParser
 import json
+import re
 from secrets import token_hex
 from time import sleep
 from typing import NamedTuple
@@ -19,6 +20,8 @@ class IncomingReply(NamedTuple):
     message: object
     # Provider metadata, never a MIME header or a value supplied by the sender.
     authenticated_sender: str | None = None
+    # Verified on the original Sent message; Gmail may replace our Message-ID.
+    original_message_id: str | None = None
 
 
 class RejectedSend(RuntimeError):
@@ -75,12 +78,53 @@ class Gmail:
 
     def find(self, message):
         api = self.users.messages()
-        result = api.list(userId="me", labelIds=["SENT"], q=f"rfc822msgid:{message[1:-1]}",
-                          maxResults=10).execute(num_retries=2)
-        hits = result.get("messages", [])
-        if len(hits) > 1:
-            raise RuntimeError("More than one sent message matches the delivery.")
-        return hits[0] if hits else None
+        parts = delivery_parts(message)
+        queries = [f"rfc822msgid:{message[1:-1]}"]
+        if parts:
+            # Gmail can rewrite Message-ID. Search the random delivery nonce in
+            # the body, then verify the exact Sent message before reconciling.
+            queries.append(f'"{parts[0]}" "{parts[1]}"')
+        for query in queries:
+            result = api.list(userId="me", labelIds=["SENT"], q=query,
+                              maxResults=10).execute(num_retries=2)
+            if result.get("nextPageToken"):
+                raise RuntimeError("Ambiguous Sent search; inspect the delivery before retrying.")
+            hits = []
+            for entry in result.get("messages", []):
+                verified = self.sent_original(entry["id"], message)
+                if verified:
+                    raw, _, _ = verified
+                    hits.append({"id": raw["id"], "threadId": raw["threadId"]})
+            if len(hits) > 1:
+                raise RuntimeError("More than one sent message matches the delivery.")
+            if hits:
+                return hits[0]
+        return None
+
+    def sent_original(self, identity, message):
+        parts = delivery_parts(message)
+        if parts is None:
+            return None
+        raw = self.users.messages().get(userId="me", id=identity, format="raw").execute(num_retries=2)
+        labels = set(raw.get("labelIds", []))
+        content = raw.get("raw", "")
+        if (raw.get("id") != identity or not raw.get("threadId") or "SENT" not in labels
+                or labels & {"DRAFT", "SPAM", "TRASH"} or len(content) > 30_000_000):
+            return None
+        mail = parse(urlsafe_b64decode(content + "=" * (-len(content) % 4)))
+        batch, nonce = parts
+        batches = mail.get_all("X-Art-Curator-Batch", [])
+        ids = mail.get_all("Message-ID", [])
+        body = mail.get_body(preferencelist=("plain",))
+        if (mail.defects or not one_address(mail, "From", self.mailbox)
+                or len(batches) != 1 or str(batches[0]).strip() != batch
+                or len(ids) != 1 or not re.fullmatch(r"<[^\s<>]+@[^\s<>]+>", str(ids[0]).strip())
+                or body is None):
+            return None
+        text = body.get_content()
+        if not isinstance(text, str) or f"Batch ID: {batch} · {nonce}" not in text.splitlines():
+            return None
+        return raw, mail, str(ids[0]).strip()
 
     def send(self, mail):
         from googleapiclient.errors import HttpError
@@ -106,6 +150,11 @@ class Gmail:
         if thread.get("id") != thread_id or delivery["provider_id"] not in {
                 entry["id"] for entry in thread.get("messages", [])}:
             return
+        original = self.sent_original(delivery["provider_id"], delivery["message"])
+        if (original is None or original[0]["threadId"] != thread_id
+                or not one_address(original[1], "To", delivery["recipient"])):
+            raise ValueError("Cannot verify the original Sent gallery and its delivery nonce.")
+        original_message_id = original[2]
         for entry in thread.get("messages", []):
             if entry["id"] == delivery["provider_id"] or set(entry.get("labelIds", [])) & blocked:
                 continue
@@ -122,7 +171,18 @@ class Gmail:
                 continue
             yield IncomingReply(raw["id"], thread_id, int(raw["internalDate"]), parse(
                 urlsafe_b64decode(content + "=" * (-len(content) % 4))
-            ), self.mailbox if self_approval else None)
+            ), self.mailbox if self_approval else None, original_message_id)
+
+
+def delivery_parts(message):
+    matched = re.fullmatch(r"<([a-f0-9]{32})\.([a-f0-9]{32})@[^\s<>]+>", message)
+    return (matched[1], matched[2]) if matched else None
+
+
+def one_address(mail, field, expected):
+    headers = mail.get_all(field, [])
+    return (len(headers) == 1 and not headers[0].defects and len(headers[0].addresses) == 1
+            and headers[0].addresses[0].addr_spec.casefold() == expected)
 
 
 def parse(raw):

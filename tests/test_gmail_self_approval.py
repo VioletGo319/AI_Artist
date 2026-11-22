@@ -6,7 +6,7 @@ import pytest
 
 from artcurator.mailer import service
 from artcurator.mailer.format import subject
-from artcurator.mailer.transport import Gmail
+from artcurator.mailer.transport import Gmail, delivery_parts
 from artcurator.settings import Environment
 from artcurator.store import Store
 from conftest import fake_generation
@@ -32,12 +32,21 @@ def self_reply(delivery, text="APPROVE: 01", sender="xwyu@udel.edu"):
     return message
 
 
-def gmail_fixture(delivery, messages, mailbox="xwyu@udel.edu"):
+def gmail_fixture(delivery, messages, mailbox="xwyu@udel.edu", original_message=None):
     original = delivery["provider_id"]
+    if original_message is None:
+        batch, nonce = delivery_parts(delivery["message"])
+        original_message = EmailMessage()
+        original_message["From"] = mailbox
+        original_message["To"] = delivery["recipient"]
+        original_message["Message-ID"] = delivery["message"]
+        original_message["X-Art-Curator-Batch"] = batch
+        original_message.set_content(f"Batch ID: {batch} · {nonce}")
     raw = {}
-    entries = [{"id": original, "labelIds": ["SENT"]}]
+    entries = []
     stamp = int(datetime.now(timezone.utc).timestamp() * 1000)
-    for index, (identity, message, labels, thread) in enumerate(messages):
+    for index, (identity, message, labels, thread) in enumerate(
+            [(original, original_message, ["SENT"], delivery["thread"]), *messages]):
         entries.append({"id": identity, "labelIds": labels})
         raw[identity] = dict(id=identity, threadId=thread, labelIds=labels,
                              internalDate=str(stamp + index),
@@ -46,7 +55,8 @@ def gmail_fixture(delivery, messages, mailbox="xwyu@udel.edu"):
     client.mailbox = mailbox
     client.users = SimpleNamespace(
         threads=lambda: SimpleNamespace(get=lambda **kw: Response(dict(id=delivery["thread"], messages=entries))),
-        messages=lambda: SimpleNamespace(get=lambda **kw: Response(raw[kw["id"]])))
+        messages=lambda: SimpleNamespace(get=lambda **kw: Response(raw[kw["id"]]),
+            list=lambda **kw: Response({"messages": [] if kw["q"].startswith("rfc822msgid:") else [{"id": original}]})))
     return client
 
 
@@ -96,7 +106,7 @@ def test_self_reply_requires_provider_sent_identity_and_original_thread(tmp_path
 
 def test_other_mailbox_sent_messages_do_not_receive_self_approval_provenance():
     delivery = dict(provider_id="original", thread="thread", recipient="xwyu@udel.edu",
-                    approver="xwyu@udel.edu", day="2026-11-22", message="<batch.token@udel.edu>")
+                    approver="xwyu@udel.edu", day="2026-11-22", message=f'<{"a" * 32}.{"b" * 32}@gmail.com>')
     client = gmail_fixture(delivery, [("reply", self_reply(delivery), ["SENT"], "thread")],
                            mailbox="curator@gmail.com")
     assert list(client.replies(delivery)) == []

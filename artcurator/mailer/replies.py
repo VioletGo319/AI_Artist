@@ -85,7 +85,7 @@ def authenticated(mail, address):
                and value[1].casefold() == domain for part in sections[1:])
 
 
-def validate_reply(mail, delivery, name, require_dmarc, authenticated_sender=None):
+def validate_reply(mail, delivery, name, require_dmarc, authenticated_sender=None, original_message_id=None):
     if mail.defects or any(part.get_content_type() == "message/rfc822" for part in mail.walk()):
         return False
     addresses = mail.get_all("From", [])
@@ -116,7 +116,10 @@ def validate_reply(mail, delivery, name, require_dmarc, authenticated_sender=Non
 
     if re.sub(r"^(?:Re:\s*)+", "", str(prefixes[0]), flags=re.I) != subject(delivery["day"]):
         return False
-    if str(parents[0]).strip() != delivery["message"] or delivery["message"] not in str(refs[0]).split():
+    if original_message_id is not None and name != "gmail":
+        return False
+    parent = original_message_id or delivery["message"]
+    if str(parents[0]).strip() != parent or parent not in str(refs[0]).split():
         return False
     batch_header = mail.get_all("X-Art-Curator-Batch", [])
     if batch_header and (len(batch_header) != 1 or str(batch_header[0]) != delivery["batch"]):

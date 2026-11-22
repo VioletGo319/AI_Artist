@@ -152,6 +152,8 @@ Install the Gmail dependencies on the private device with `python -m pip install
 
 The requested scopes are `gmail.send` and `gmail.readonly`. **The read scope grants access to the entire mailbox**, although this application reads registered gallery conversations and searches Sent for delivery reconciliation. It does not request delete, modify, contacts, or Drive permissions. Approval validation checks the exact sender, thread ID, the batch and random token embedded in the original Message-ID, `In-Reply-To`, `References`, and image numbers. Quoted history and forwarded messages do not trigger approval.
 
+Gmail may replace the submitted Message-ID. The controller obtains the actual ID from the exact original Sent message, verifies its sender, recipient, batch header, and delivery nonce, then checks replies against that ID. It never adopts a parent ID from an incoming reply. Delivery reconciliation also searches the batch and random nonce in Sent and verifies each match, so a rewritten ID does not cause a duplicate send after an uncertain network outcome.
+
 Separate-account replies require Gmail's DMARC alignment by default. Self-replies instead require Gmail's provider-supplied `SENT` label on the exact message in the verified OAuth mailbox, with matching From/To and no Cc/Bcc. A sender-controlled header cannot supply this evidence. The original gallery message is never an approval. Reply directly to that original email, keep yourself as the only recipient, and write only the command above the quoted history. [Gmail system labels](https://developers.google.com/workspace/gmail/api/guides/labels)
 
 By default, only undecided conversations sent within the last 30 days are checked. Explicit send rejections have bounded retries. If a network failure leaves message acceptance uncertain, the next run searches Sent instead of resending, avoiding duplicate mail. Inspect the outcome with `status`. Real integration testing must verify sender evidence and the reply client's preservation of threading headers. `gmail-status` without `--connect` reports local file presence only; exit code 3 means OAuth setup is incomplete. [Gmail API scopes](https://developers.google.com/workspace/gmail/api/auth/scopes) · [Gmail threads](https://developers.google.com/workspace/gmail/api/guides/threads)
@@ -225,6 +227,7 @@ Real validation has completed for Z-Image-Turbo generation on one Caviness A100 
 │   ├── conftest.py
 │   ├── test_generation_scheduler.py
 │   ├── test_gmail_self_approval.py
+│   ├── test_gmail_message_id.py
 │   ├── test_gpu_allocation.py
 │   ├── test_hpc_container.py
 │   ├── test_mail_publish.py
