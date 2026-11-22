@@ -1,5 +1,6 @@
 from datetime import datetime, timedelta, timezone
 import json
+import shlex
 import subprocess
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -97,6 +98,19 @@ def test_slurm_17_query_filters_by_remote_account(setup):
     assert '--user="$(id -u)"' in command[2]
     assert "--me" not in command[2]
     assert f"--name=ac-{plan.id}" in command[2]
+
+
+def test_caviness_workgroup_preserves_nested_command_arguments(setup):
+    env, _ = setup
+    env.values.update(HPC_WORKGROUP="weiqian_stat", HPC_REMOTE_ROOT="/work/a project")
+    client = Slurm(env, dry=True)
+    inner = ['sh', '-c', 'printf "%s\\n" "a b"; id -u']
+    remote = shlex.split(client.ssh_command(inner)[-1])
+    assert remote[:4] == ["workgroup", "--group", "weiqian_stat", "--command"]
+    assert remote[4] == "cd '/work/a project' && exec " + shlex.join(inner)
+    env.values["HPC_WORKGROUP"] = "bad;command"
+    with pytest.raises(ValueError, match="Invalid Slurm"):
+        Slurm(env, dry=True)
 
 
 class FakeSlurm:

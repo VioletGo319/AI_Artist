@@ -28,6 +28,7 @@ class Slurm:
         self.partition = env.get("HPC_PARTITION", "APPROVED_PARTITION")
         self.qos = env.get("HPC_QOS", "APPROVED_QOS")
         self.account = env.get("HPC_ACCOUNT", "APPROVED_ACCOUNT")
+        self.workgroup = env.get("HPC_WORKGROUP")
         if not dry:
             if not all(env.flag(key) for key in ("HPC_ENABLED", "HPC_AUTHORIZED", "HPC_OPPORTUNISTIC")):
                 raise ValueError("Slurm requires HPC_ENABLED, HPC_AUTHORIZED and HPC_OPPORTUNISTIC.")
@@ -35,6 +36,7 @@ class Slurm:
                                                 "HPC_REMOTE_ROOT", "HPC_REMOTE_PYTHON")):
                 raise ValueError("Approved Slurm host, account, partition, QoS, root and Python are required.")
         if (any(not TOKEN.fullmatch(value) for value in (self.partition, self.qos, self.account))
+                or (self.workgroup and not TOKEN.fullmatch(self.workgroup))
                 or any(not PurePosixPath(value).is_absolute() or "\n" in value for value in (self.root, self.python))
                 or (self.host and not HOST.fullmatch(self.host))):
             raise ValueError("Invalid Slurm settings.")
@@ -54,9 +56,14 @@ class Slurm:
                 scheduled_day or plan.day.isoformat(), plan.id, deadline.isoformat()]
 
     def ssh_command(self, command):
+        remote = f"cd {shlex.quote(self.root)} && exec {shlex.join(command)}"
+        if self.workgroup:
+            # Caviness workgroup requires one quoted command string. The '@'
+            # form joins argv and loses nested quoting for sh -c and paths.
+            remote = shlex.join(["workgroup", "--group", self.workgroup, "--command", remote])
         return ["ssh", "-o", "BatchMode=yes", "-o", "ConnectTimeout=10",
                 "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=2", "-o", "StrictHostKeyChecking=yes",
-                self.host or "APPROVED_HOST", f"cd {shlex.quote(self.root)} && {shlex.join(command)}"]
+                self.host or "APPROVED_HOST", remote]
 
     def ssh(self, command, data=None):
         return subprocess.run(self.ssh_command(command), input=data, capture_output=True, timeout=55)

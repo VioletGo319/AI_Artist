@@ -73,7 +73,13 @@ hf download Tongyi-MAI/Z-Image-Turbo --local-dir weights/diffusers/Tongyi-MAI/Z-
 1. 在私人设备运行 `python -m artcurator scheduler --dry-run`。此命令仅打印计划。
 2. 取得授权后，把代码、环境及已许可的权重放到管理员允许的位置。远端只需要 Python 基础包与模型环境。创建私有 `private/` 和 `weights/`，保持 OAuth、Gmail 和 Git 发布凭据在私人设备。SQLite 与文件锁需要支持 POSIX 锁的持久文件系统。
 3. 已根据报告的 Slurm 17.11.8 调整参数：使用 `--export=PATH=/usr/bin:/bin` 显式传递最小环境（该版本不支持 `NIL`），通过远端 `id -u` 和 `squeue --user` 查询本账号作业（不使用 `--me`）。保留 `--deadline`、`--no-requeue`。让管理员核实 `gpu:a100:1` 名称、A100 40GB 可见范围及分区/QoS 权限。Slurm 解析提交时间时使用提交主机时区，当前配置应与该主机一致。先核对 SSH host key，配置管理员允许的非交互式 SSH 路径。参数参照 [Slurm 17.11.8 sbatch 手册](https://github.com/SchedMD/slurm/blob/slurm-17-11-8-1/doc/man/man1/sbatch.1)和 [squeue 手册](https://github.com/SchedMD/slurm/blob/slurm-17-11-8-1/doc/man/man1/squeue.1)；尚未完成真实集群作业验证。
-4. 在私机填入 `HPC_HOST`、`HPC_ACCOUNT`、`HPC_PARTITION`、`HPC_QOS`、`HPC_REMOTE_ROOT`、`HPC_REMOTE_PYTHON`。路径用远端绝对路径。确认后在私机设置三个 HPC 开关，保持 `scheduler.mode: slurm`，再使用 `scheduler` 或 `tick`。默认时间上限 `runtime_minutes: 30` 不能超过 30；作业为 `--gres=gpu:a100:1 --time=00:30:00`。
+4. 在私机填入 `HPC_HOST`、`HPC_ACCOUNT`、`HPC_PARTITION`、`HPC_QOS`、`HPC_REMOTE_ROOT`、`HPC_REMOTE_PYTHON`。Caviness 另设 `HPC_WORKGROUP` 为获授权工作组；SSH 命令会通过 `workgroup --command` 进入该组，包括提交、查询和取回作品。路径用远端绝对路径。确认后在私机设置三个 HPC 开关，保持 `scheduler.mode: slurm`，再使用 `scheduler` 或 `tick`。默认时间上限 `runtime_minutes: 30` 不能超过 30；作业为 `--gres=gpu:a100:1 --time=00:30:00`。
+
+**CentOS 7 容器环境。** glibc 2.17 的宿主机不能直接使用许多现代 Python/CUDA wheels。可用 Apptainer 分离轻量控制环境和 GPU 模型环境：远端创建 `containers/`、`private/`，把 `config/hpc-runtime.env.example` 复制为 `private/runtime.env`（权限 600），填入 Apptainer、两个 SIF 镜像与镜像内 Python 的绝对路径。然后把私机 `HPC_REMOTE_PYTHON` 指向远端 `config/hpc-python.sh`，赋予脚本执行权限。远端也必须有项目根目录的 `config.yaml`。
+
+脚本在登录节点使用控制镜像，显式清空 `CUDA_VISIBLE_DEVICES`；在 Slurm 作业内要求分配的 GPU 标识，使用模型镜像、`--nv` 并保留 Slurm 的设备映射。只挂载项目目录，使用干净的环境，不传递 Gmail/OAuth 凭据。SIF 临时展开使用节点本地临时目录，避免共享 NFS 的清理问题。可先用官方 `python:3.12-slim-bookworm` 镜像创建 `.venv-control`，安装 `pip install -e .`；GPU 镜像需要独立安装已固定的模型依赖与缓存权重。控制容器的 Python 和 mock 测试通过不代表 A100 推理通过。完整测试还需要镜像包含 `git` 和 `ps`，轻量控制镜像默认没有这两个命令。
+
+容器不能替换宿主 GPU 驱动。须取得 **A100 计算节点的实际驱动版本**，再选择 CUDA/PyTorch/vLLM 组合；VALET 中 CUDA toolkit 的版本不能代替此信息。兼容性检查也必须经 Slurm 申请，计入当日一次任务额度。不要在登录节点安装系统 glibc、启动推理或常驻轮询。[Apptainer GPU 要求](https://apptainer.org/docs/user/latest/gpu.html)
 
 每个本地日期共享一条 SQLite 调度记录，每天最多调用一次真实 `sbatch`，累计 GPU 运行时间不超过 30 分钟。默认请求一张 A100、30 分钟墙钟和约 10 分钟排队准入窗口。若接近午夜，调度器收紧窗口。等待资源失败时当日作废，并在后续状态检查中取消超期作业。抢占后不自动重新入队。私机发出短时 SSH 命令记录状态，并在作业退出后拉取已完成的候选。无需在登录节点保持轮询进程。
 
