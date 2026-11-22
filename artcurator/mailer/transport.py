@@ -4,11 +4,21 @@ from email.parser import BytesParser
 import json
 from secrets import token_hex
 from time import sleep
+from typing import NamedTuple
 
 from artcurator.store import atomic
 
 
 SCOPES = ["https://www.googleapis.com/auth/gmail.send", "https://www.googleapis.com/auth/gmail.readonly"]
+
+
+class IncomingReply(NamedTuple):
+    identity: str
+    thread: str
+    timestamp: int
+    message: object
+    # Provider metadata, never a MIME header or a value supplied by the sender.
+    authenticated_sender: str | None = None
 
 
 class RejectedSend(RuntimeError):
@@ -59,7 +69,8 @@ class Gmail:
         self.users = build("gmail", "v1", http=AuthorizedHttp(credentials, http=httplib2.Http(timeout=30)),
                            cache_discovery=False).users()
         profile = self.users.getProfile(userId="me").execute(num_retries=2)
-        if profile["emailAddress"].casefold() != env.get("GMAIL_SENDER").casefold():
+        self.mailbox = profile["emailAddress"].casefold()
+        if self.mailbox != env.get("GMAIL_SENDER").casefold():
             raise ValueError("GMAIL_SENDER must match the OAuth mailbox.")
 
     def find(self, message):
@@ -87,24 +98,31 @@ class Gmail:
 
     def replies(self, delivery):
         thread_id = delivery["thread"]
+        self_approval = delivery["recipient"] == delivery["approver"] == self.mailbox
+        blocked = {"DRAFT", "SPAM", "TRASH"}
+        if not self_approval:
+            blocked.add("SENT")
         thread = self.users.threads().get(userId="me", id=thread_id, format="minimal").execute(num_retries=2)
         if thread.get("id") != thread_id or delivery["provider_id"] not in {
                 entry["id"] for entry in thread.get("messages", [])}:
             return
         for entry in thread.get("messages", []):
-            if entry["id"] == delivery["provider_id"] or set(entry.get("labelIds", [])) & {
-                    "SENT", "DRAFT", "SPAM", "TRASH"}:
+            if entry["id"] == delivery["provider_id"] or set(entry.get("labelIds", [])) & blocked:
                 continue
             raw = self.users.messages().get(userId="me", id=entry["id"], format="raw").execute(num_retries=2)
             if (raw.get("id") != entry["id"] or raw.get("threadId") != thread_id
-                    or set(raw.get("labelIds", [])) & {"SENT", "DRAFT", "SPAM", "TRASH"}):
+                    or set(raw.get("labelIds", [])) & blocked):
+                continue
+            # For self-approval, require Gmail's own SENT label on this exact
+            # message, not a thread label or a sender-controlled MIME header.
+            if self_approval and "SENT" not in raw.get("labelIds", []):
                 continue
             content = raw["raw"]
             if len(content) > 4_000_000:
                 continue
-            yield raw["id"], thread_id, int(raw["internalDate"]), parse(
+            yield IncomingReply(raw["id"], thread_id, int(raw["internalDate"]), parse(
                 urlsafe_b64decode(content + "=" * (-len(content) % 4))
-            )
+            ), self.mailbox if self_approval else None)
 
 
 def parse(raw):
@@ -132,7 +150,8 @@ class MockMail:
     def replies(self, delivery):
         folder = self.folder / "inbox" / delivery["thread"]
         for path in sorted(folder.glob("*.eml")):
-            yield f"mock:{path.stem}", delivery["thread"], int(path.stat().st_mtime * 1000), parse(path.read_bytes())
+            yield IncomingReply(f"mock:{path.stem}", delivery["thread"],
+                                int(path.stat().st_mtime * 1000), parse(path.read_bytes()))
 
 
 def pause_for_retry(attempt):

@@ -7,7 +7,7 @@ from secrets import token_hex
 
 from artcurator.mailer.format import gallery_message, subject
 from artcurator.mailer.replies import fresh_content, parse_command, validate_reply
-from artcurator.mailer.transport import Gmail, MockMail, RejectedSend, UnknownSend, pause_for_retry
+from artcurator.mailer.transport import Gmail, MockMail, RejectedSend, UnknownSend, pause_for_retry, token_path
 from artcurator.preference_engine.engine import preference_snapshot
 from artcurator.store import atomic, utcnow
 
@@ -21,9 +21,28 @@ def addresses(env, mock):
     approver = env.get("GMAIL_APPROVER", recipient).casefold()
     if not all(ADDRESS.fullmatch(address) for address in (sender, recipient, approver)):
         raise ValueError("Set valid GMAIL_SENDER, GMAIL_RECIPIENT and GMAIL_APPROVER addresses.")
-    if not mock and sender == approver:
-        raise ValueError("The Gmail sender and approval mailbox must be separate accounts.")
+    if not mock and sender == approver and recipient != sender:
+        raise ValueError("Self-approval requires the sender, recipient and approver to be the same mailbox.")
     return sender, recipient, approver
+
+
+def readiness(env, connect=False):
+    """Report local setup, or verify the OAuth profile without reading/sending mail."""
+    sender, recipient, approver = addresses(env, False)
+    client = env.path("GMAIL_CLIENT_SECRET", "private/oauth-client.json")
+    if client.is_relative_to(env.public):
+        raise ValueError("OAuth credentials must stay outside the public directory.")
+    token = token_path(env)
+    result = dict(enabled=env.flag("GMAIL_ENABLED"), sender=sender, recipient=recipient,
+                  approver=approver, self_approval=sender == recipient == approver,
+                  client_present=client.is_file(), token_present=token.is_file(),
+                  connected=False)
+    if connect:
+        if not token.is_file():
+            raise ValueError("OAuth token missing. Run gmail-auth on your private device first.")
+        result.update(connected=True, mailbox=Gmail(env).mailbox)
+    result["status"] = "connected" if connect else "not_verified" if token.is_file() else "setup_required"
+    return result
 
 
 def proposal(batch, medium, sender, recipient, approver):
@@ -132,13 +151,15 @@ def check(store, env, mock, transport=None):
             available = {item["slot"]: item for item in store.artworks(delivery["batch"])}
             after = int(datetime.fromisoformat(delivery["sent_at"]).timestamp() * 1000)
             # Sort by Gmail's receipt time so the first valid reply closes the batch.
-            for identity, thread, timestamp, mail in sorted(transport.replies(delivery), key=lambda row: (row[2], row[0])):
+            for identity, thread, timestamp, mail, authenticated_sender in sorted(
+                    transport.replies(delivery), key=lambda row: (row[2], row[0])):
                 with store.connect() as db:
                     if db.execute("SELECT 1 FROM replies WHERE id=?", (identity,)).fetchone():
                         continue
                 try:
                     valid = (thread == delivery["thread"] and timestamp >= after
-                             and validate_reply(mail, delivery, medium, env.settings.mail.require_dmarc))
+                             and validate_reply(mail, delivery, medium, env.settings.mail.require_dmarc,
+                                                authenticated_sender=authenticated_sender))
                     command = parse_command(fresh_content(mail), set(available)) if valid else None
                 except (ValueError, LookupError, TypeError, AttributeError):
                     command = None

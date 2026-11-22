@@ -10,7 +10,7 @@ from artcurator.curator.publish import publish
 from artcurator.mailer import service
 from artcurator.mailer.format import subject
 from artcurator.mailer.replies import fresh_content, parse_command
-from artcurator.mailer.transport import MockMail, RejectedSend, UnknownSend, parse
+from artcurator.mailer.transport import IncomingReply, MockMail, RejectedSend, UnknownSend, parse
 from artcurator.settings import Environment
 from artcurator.store import Store
 
@@ -147,9 +147,9 @@ class GmailFixture:
         stamp = int(datetime.now(timezone.utc).timestamp() * 1000)
         wrong = parse(answer.as_bytes())
         wrong.replace_header("Authentication-Results", "unknown; dmarc=pass header.from=example.test")
-        yield "missing-dmarc", delivery["thread"], stamp, wrong
-        yield "wrong-thread", "other-thread", stamp, answer
-        yield "valid-reply", delivery["thread"], stamp, answer
+        yield IncomingReply("missing-dmarc", delivery["thread"], stamp, wrong)
+        yield IncomingReply("wrong-thread", "other-thread", stamp, answer)
+        yield IncomingReply("valid-reply", delivery["thread"], stamp, answer)
 
 
 def test_production_publish_to_local_git_remote(tmp_path, monkeypatch):

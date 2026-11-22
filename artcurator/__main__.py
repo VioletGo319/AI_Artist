@@ -48,6 +48,8 @@ def arguments(argv):
     sub.add_argument("--mock", action="store_true")
     commands.add_parser("status")
     commands.add_parser("gmail-auth")
+    commands.add_parser("gmail-status", help="Check OAuth setup without sending mail.").add_argument(
+        "--connect", action="store_true", help="Verify the OAuth mailbox with a read-only profile request.")
     commands.add_parser("hpc-stage")
     commands.add_parser("hpc-export").add_argument("--batch", required=True)
     commands.add_parser("_expand").add_argument("--batch", required=True)
@@ -130,6 +132,10 @@ def main(argv=None):
             authorize(env)
             print("Gmail OAuth token stored privately.")
             return 0
+        if command == "gmail-status":
+            result = mail.readiness(env, args.connect)
+            print(json.dumps(result, indent=2))
+            return 0 if result["token_present"] else 3
         store = Store(env.state)
         if command == "status":
             report(store, env)

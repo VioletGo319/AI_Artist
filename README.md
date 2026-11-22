@@ -143,16 +143,18 @@ Use `scheduler` or `tick` for production. Do not run `generate` on a login node.
 
 ## Gmail OAuth and human approval
 
-Install the Gmail dependencies on the private device with `python -m pip install -e '.[gmail]'`. Use a dedicated Gmail sending account so OAuth does not need access to your everyday mailbox. The sending and approving accounts must be different addresses.
+Install the Gmail dependencies on the private device with `python -m pip install -e '.[gmail]'`. A separate sending account is supported, as is a single Gmail/Google Workspace mailbox used for sending, receiving, and approving. For the latter, set all three address variables to the exact OAuth mailbox address. See [the Gmail setup guide](config/gmail-setup.md) for consent, self-replies, and scheduled operation.
 
 1. Enable the Gmail API in a Google Cloud project. Configure the OAuth consent screen and add test users or select an internal application according to your Workspace policy.
 2. Create a **Desktop app** OAuth client. Save the JSON file as `private/oauth-client.json`, readable only on the private device. Configure `GMAIL_ENABLED=true`, `GMAIL_SENDER`, `GMAIL_RECIPIENT`, and `GMAIL_APPROVER` in the local `.env`. The approver defaults to the recipient if omitted. Override credential paths with `GMAIL_CLIENT_SECRET` and `GMAIL_TOKEN` if needed.
-3. Run `python -m artcurator gmail-auth` where a local browser is available and authorize the sending account. The OAuth callback binds locally, and the refresh token is stored privately. External applications in testing mode may need periodic reauthorization under Google's testing policies.
+3. Run `python -m artcurator gmail-auth` where a local browser is available and authorize the sending account. The OAuth callback binds locally, and the refresh token is stored privately. Run `python -m artcurator gmail-status --connect` to verify the account without sending email. External applications in Testing status receive refresh tokens that expire after seven days for these scopes; plan appropriate production/internal configuration for unattended operation. [Google token expiration](https://developers.google.com/identity/protocols/oauth2#expiration)
 4. Inspect `python -m artcurator preview-email --latest`. After authorizing real sending, run `python -m artcurator send-email --latest`. Reply directly to the original conversation from the configured approving address, using a standalone line containing `APPROVE: 01, 03, 04`, `APPROVE: ALL`, or `SKIP`. Then run `python -m artcurator check-replies`.
 
-The requested scopes are `gmail.send` and `gmail.readonly`. Read access is used to inspect the designated conversations and reconcile messages in Sent. Approval validation checks the exact sender, Gmail's DMARC alignment, thread ID, the batch and random token embedded in the original Message-ID, `In-Reply-To`, `References`, and image numbers. Quoted history and forwarded messages do not trigger approval.
+The requested scopes are `gmail.send` and `gmail.readonly`. **The read scope grants access to the entire mailbox**, although this application reads registered gallery conversations and searches Sent for delivery reconciliation. It does not request delete, modify, contacts, or Drive permissions. Approval validation checks the exact sender, thread ID, the batch and random token embedded in the original Message-ID, `In-Reply-To`, `References`, and image numbers. Quoted history and forwarded messages do not trigger approval.
 
-By default, only undecided conversations sent within the last 30 days are checked. Explicit send rejections have bounded retries. If a network failure leaves message acceptance uncertain, the next run searches Sent instead of resending, avoiding duplicate mail. Inspect the outcome with `status`. Real integration testing must verify DMARC headers and the reply client's preservation of threading headers. [Gmail API scopes](https://developers.google.com/workspace/gmail/api/auth/scopes) · [Gmail threads](https://developers.google.com/workspace/gmail/api/guides/threads)
+Separate-account replies require Gmail's DMARC alignment by default. Self-replies instead require Gmail's provider-supplied `SENT` label on the exact message in the verified OAuth mailbox, with matching From/To and no Cc/Bcc. A sender-controlled header cannot supply this evidence. The original gallery message is never an approval. Reply directly to that original email, keep yourself as the only recipient, and write only the command above the quoted history. [Gmail system labels](https://developers.google.com/workspace/gmail/api/guides/labels)
+
+By default, only undecided conversations sent within the last 30 days are checked. Explicit send rejections have bounded retries. If a network failure leaves message acceptance uncertain, the next run searches Sent instead of resending, avoiding duplicate mail. Inspect the outcome with `status`. Real integration testing must verify sender evidence and the reply client's preservation of threading headers. `gmail-status` without `--connect` reports local file presence only; exit code 3 means OAuth setup is incomplete. [Gmail API scopes](https://developers.google.com/workspace/gmail/api/auth/scopes) · [Gmail threads](https://developers.google.com/workspace/gmail/api/guides/threads)
 
 ## GitHub Pages and scheduled operation
 
@@ -205,6 +207,7 @@ Real validation has completed for Z-Image-Turbo generation on one Caviness A100 
 │   ├── demo.sh
 │   ├── demo.yaml
 │   ├── e2e.sh
+│   ├── gmail-setup.md
 │   ├── hpc-python.sh
 │   ├── hpc-runtime.env.example
 │   └── slurm.sbatch
@@ -221,6 +224,7 @@ Real validation has completed for Z-Image-Turbo generation on one Caviness A100 
 ├── tests/
 │   ├── conftest.py
 │   ├── test_generation_scheduler.py
+│   ├── test_gmail_self_approval.py
 │   ├── test_gpu_allocation.py
 │   ├── test_hpc_container.py
 │   ├── test_mail_publish.py

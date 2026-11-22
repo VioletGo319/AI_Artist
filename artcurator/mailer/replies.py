@@ -85,7 +85,7 @@ def authenticated(mail, address):
                and value[1].casefold() == domain for part in sections[1:])
 
 
-def validate_reply(mail, delivery, name, require_dmarc):
+def validate_reply(mail, delivery, name, require_dmarc, authenticated_sender=None):
     if mail.defects or any(part.get_content_type() == "message/rfc822" for part in mail.walk()):
         return False
     addresses = mail.get_all("From", [])
@@ -94,7 +94,13 @@ def validate_reply(mail, delivery, name, require_dmarc):
     address = addresses[0].addresses[0].addr_spec.casefold()
     if address != delivery["approver"]:
         return False
-    if name == "gmail" and require_dmarc and not authenticated(mail, address):
+    if authenticated_sender is not None:
+        recipients = mail.get_all("To", [])
+        if (name != "gmail" or authenticated_sender != address or delivery["recipient"] != address
+                or len(recipients) != 1 or recipients[0].defects or len(recipients[0].addresses) != 1
+                or recipients[0].addresses[0].addr_spec.casefold() != address or "Cc" in mail or "Bcc" in mail):
+            return False
+    elif name == "gmail" and require_dmarc and not authenticated(mail, address):
         return False
     for key in ("Resent-From", "Resent-To", "Auto-Submitted", "X-Forwarded-For"):
         if key in mail:
