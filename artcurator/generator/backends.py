@@ -1,6 +1,7 @@
 from importlib.util import find_spec
 import math
 import os
+import sys
 from pathlib import Path
 from random import Random
 
@@ -18,9 +19,19 @@ def gpu(only_a100=False):
 
     if not torch.cuda.is_available():
         raise NoGPU("No visible CUDA GPU.")
-    if only_a100 and (torch.cuda.device_count() != 1 or "A100" not in torch.cuda.get_device_name(0)
-                      or not 38 <= torch.cuda.get_device_properties(0).total_memory / 1024**3 < 45):
-        raise NoGPU("Slurm must expose exactly one allocated A100 40 GB GPU.")
+    if only_a100:
+        count = torch.cuda.device_count()
+        if count != 1:
+            raise NoGPU(f"Slurm must expose exactly one GPU; found {count}, "
+                        f"CUDA_VISIBLE_DEVICES={os.getenv('CUDA_VISIBLE_DEVICES', '<unset>')}.")
+        name = torch.cuda.get_device_name(0)
+        memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+        print(f"Allocated GPU: {name}; memory={memory:.2f} GiB; count={count}", file=sys.stderr, flush=True)
+        # Slurm's gpu:a100 GRES can include either full 40 GB or 80 GB cards.
+        # Larger full cards satisfy the model's memory requirement too.
+        if ("A100" not in name or "MIG" in name.upper()
+                or not (38 <= memory < 45 or 75 <= memory < 85)):
+            raise NoGPU(f"Expected one full A100 40/80 GB; received {name}, {memory:.2f} GiB.")
     torch.cuda.set_device(0)
     if not torch.cuda.is_bf16_supported(including_emulation=False):
         raise NoGPU("This CUDA device lacks native BF16 support.")
