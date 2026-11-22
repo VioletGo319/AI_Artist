@@ -18,7 +18,7 @@ test('production build renders only the approved manifest', async ({ page }) => 
     await expect(first.locator('h3')).toHaveText(manifest.artworks[0].title)
     await expect.poll(() => first.locator('img').evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0)
     await first.locator('.tile-image a').click()
-    await expect(page.getByRole('heading', { name: manifest.artworks[0].title, exact: true })).toBeVisible()
+    await expect(page.getByRole('heading', { name: manifest.artworks[0].title, exact: true, level: 1 })).toBeVisible()
     await expect(page.getByRole('heading', { name: 'Prompt', exact: true })).toBeVisible()
   }
 })
@@ -58,7 +58,7 @@ test('mock approval feeds the masonry gallery, filters, details, download and fa
   await page.reload()
   await expect(page.locator('#favorites .tile')).toHaveCount(1)
   await page.getByRole('link', { name: `View ${title}` }).click()
-  await expect(page.getByRole('heading', { name: title })).toBeVisible()
+  await expect(page.getByRole('heading', { name: title, level: 1 })).toBeVisible()
   await expect(page.getByRole('heading', { name: 'Prompt' })).toBeVisible()
   await expect(page.getByText('mock/procedural')).toBeVisible()
   const downloadEvent = page.waitForEvent('download')
