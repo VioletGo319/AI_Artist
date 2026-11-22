@@ -5,7 +5,7 @@
 #SBATCH --time=02:00:00
 #SBATCH --no-requeue
 #SBATCH --signal=B:USR1@60
-#SBATCH --export=NIL
+#SBATCH --export=PATH=/usr/bin:/bin
 set -euo pipefail
 
 # Submitted only by the authorized private-host scheduler with policy-specific flags.

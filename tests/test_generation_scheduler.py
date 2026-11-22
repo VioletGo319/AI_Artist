@@ -74,12 +74,27 @@ def test_slurm_runtime_and_single_gpu(setup):
         Schedule(runtime_minutes=121)
     dry = service.dry_run(env, NOW)["slurm_example"]
     assert "--time=02:00:00" in dry and "--gres=gpu:a100:1" in dry and "--no-requeue" in dry
+    assert "--export=PATH=/usr/bin:/bin" in dry and "--export=NIL" not in dry
     assert "--deadline=2026-11-22T12:10:00" in dry
     script = (Environment().root / "config/slurm.sbatch").read_text()
     assert "#SBATCH --time=02:00:00" in script and "#SBATCH --gres=gpu:a100:1" in script
     assert "nvidia-smi" not in script
     result = subprocess.run(["bash", "-n", "config/slurm.sbatch"], capture_output=True)
     assert result.returncode == 0
+
+
+def test_slurm_17_query_filters_by_remote_account(setup):
+    env, _ = setup
+    client = Slurm(env, dry=True)
+    plan = SimpleNamespace(id="a" * 32)
+    with patch.object(client, "ssh", return_value=SimpleNamespace(
+            returncode=0, stdout=b"12345\n", stderr=b"")) as ssh:
+        assert client.active(plan) == ["12345"]
+    command = ssh.call_args.args[0]
+    assert command[:2] == ["sh", "-c"]
+    assert '--user="$(id -u)"' in command[2]
+    assert "--me" not in command[2]
+    assert f"--name=ac-{plan.id}" in command[2]
 
 
 class FakeSlurm:

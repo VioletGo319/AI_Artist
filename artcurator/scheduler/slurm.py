@@ -44,7 +44,7 @@ class Slurm:
         return ["sbatch", "--parsable", f"--account={self.account}", f"--partition={self.partition}",
                 f"--qos={self.qos}", "--gres=gpu:a100:1", f"--time={time_limit}",
                 f"--deadline={deadline.astimezone(self.env.tz):%Y-%m-%dT%H:%M:%S}",
-                "--no-requeue", f"--job-name=ac-{plan.id}", "--export=NIL",
+                "--no-requeue", f"--job-name=ac-{plan.id}", "--export=PATH=/usr/bin:/bin",
                 f"--cpus-per-task={self.env.settings.scheduler.cpus}", f"--mem={self.env.settings.scheduler.memory}",
                 f"--chdir={self.root}", f"--output={self.root}/private/slurm-%j.out",
                 f"{self.root}/config/slurm.sbatch", self.root, self.python,
@@ -73,7 +73,11 @@ class Slurm:
         return match[1].decode() if match else None
 
     def active(self, plan):
-        result = self.ssh(["squeue", "--me", "--noheader", f"--name=ac-{plan.id}", "--format=%i"])
+        # Slurm 17.11 has no --me. Resolve the SSH account's UID remotely,
+        # rather than querying the private scheduler host's local username.
+        query = 'exec squeue --user="$(id -u)" ' + shlex.join(
+            ["--noheader", f"--name=ac-{plan.id}", "--format=%i"])
+        result = self.ssh(["sh", "-c", query])
         return checked(result, "query").strip().decode().splitlines()
 
     def cancel(self, jobs):

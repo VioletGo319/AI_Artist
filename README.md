@@ -72,7 +72,7 @@ hf download Tongyi-MAI/Z-Image-Turbo --local-dir weights/diffusers/Tongyi-MAI/Z-
 
 1. 在私人设备运行 `python -m artcurator scheduler --dry-run`。此命令仅打印计划。
 2. 取得授权后，把代码、环境及已许可的权重放到管理员允许的位置。远端只需要 Python 基础包与模型环境。创建私有 `private/` 和 `weights/`，保持 OAuth、Gmail 和 Git 发布凭据在私人设备。SQLite 与文件锁需要支持 POSIX 锁的持久文件系统。
-3. 让管理员核实 Caviness 当前 Slurm 版本支持本项目的 `--deadline`、`--no-requeue`、`--export=NIL`、`squeue --me`，以及 `gpu:a100:1` 的名称和 A100 40GB 可见范围。Slurm 解析提交时间时使用提交主机时区，当前配置应与该主机一致。先核对 SSH host key，配置管理员允许的非交互式 SSH 路径。
+3. 已根据报告的 Slurm 17.11.8 调整参数：使用 `--export=PATH=/usr/bin:/bin` 显式传递最小环境（该版本不支持 `NIL`），通过远端 `id -u` 和 `squeue --user` 查询本账号作业（不使用 `--me`）。保留 `--deadline`、`--no-requeue`。让管理员核实 `gpu:a100:1` 名称、A100 40GB 可见范围及分区/QoS 权限。Slurm 解析提交时间时使用提交主机时区，当前配置应与该主机一致。先核对 SSH host key，配置管理员允许的非交互式 SSH 路径。参数参照 [Slurm 17.11.8 sbatch 手册](https://github.com/SchedMD/slurm/blob/slurm-17-11-8-1/doc/man/man1/sbatch.1)和 [squeue 手册](https://github.com/SchedMD/slurm/blob/slurm-17-11-8-1/doc/man/man1/squeue.1)；尚未完成真实集群作业验证。
 4. 在私机填入 `HPC_HOST`、`HPC_ACCOUNT`、`HPC_PARTITION`、`HPC_QOS`、`HPC_REMOTE_ROOT`、`HPC_REMOTE_PYTHON`。路径用远端绝对路径。确认后在私机设置三个 HPC 开关，保持 `scheduler.mode: slurm`，再使用 `scheduler` 或 `tick`。默认时间上限 `runtime_minutes: 120` 不能超过 120；作业为 `--gres=gpu:a100:1 --time=02:00:00`。
 
 每个本地日期共享一条 SQLite 调度记录，每天最多调用一次真实 `sbatch`，累计 GPU 运行时间不超过两小时。默认请求一张 A100、两小时墙钟和约 10 分钟排队准入窗口。若接近午夜，调度器收紧窗口。等待资源失败时当日作废，并在后续状态检查中取消超期作业。抢占后不自动重新入队。私机发出短时 SSH 命令记录状态，并在作业退出后拉取已完成的候选。无需在登录节点保持轮询进程。
