@@ -109,7 +109,7 @@ def test_large_batch_pages_and_three_digit_approval(setup, tmp_path, monkeypatch
     assert len(pages) == 2
     worker.generation_state(store, plan, "running")
     import_results(store, plan, pages[0], finalize_batch=False)
-    assert mail.send(store, env, store.batch(), True) == "empty: batch still running"
+    assert mail.send(store, env, store.batch(plan.day.isoformat()), True) == "empty: batch still running"
     for page in pages:
         import_results(store, plan, page, finalize_batch=False)
     assert worker.finalize(store, plan) == 11
@@ -155,5 +155,5 @@ def test_paginated_import_failure_keeps_batch_unmailable(tmp_path):
     client.retrieve_pages = broken_pages
     with pytest.raises(RuntimeError, match="transfer interrupted"):
         service.schedule(store, env, NOW + timedelta(minutes=35), client)
-    assert store.batch()["state"] == "running"
+    assert store.batch(NOW.date().isoformat())["state"] == "running"
     assert client.calls == 1
