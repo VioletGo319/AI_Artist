@@ -14,4 +14,5 @@ export PATH="/usr/bin:/bin:$(dirname "$2")"
 export ART_STATE_DIR="$1/private"
 export ART_WEIGHTS_DIR="$1/weights"
 export HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1
+export ART_ALLOCATION_START=$(date +%s)
 exec "$2" -m artcurator hpc-worker --day "$3" --batch "$4" --deadline "$5"

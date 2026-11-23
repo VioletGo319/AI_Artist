@@ -43,11 +43,12 @@ def test_control_container_never_enables_gpu(container_adapter):
 
 def test_gpu_container_preserves_slurm_assignment(container_adapter):
     wrapper, env = container_adapter
-    env.update(SLURM_JOB_ID="123", CUDA_VISIBLE_DEVICES="2")
+    env.update(SLURM_JOB_ID="123", CUDA_VISIBLE_DEVICES="2", ART_ALLOCATION_START="1795438800")
     result = subprocess.run(["bash", str(wrapper), "-m", "artcurator", "hpc-worker"], env=env,
                             capture_output=True, text=True, check=True)
     args = json.loads(result.stdout)
     assert "--nv" in args and "CUDA_VISIBLE_DEVICES=2" in args and "SLURM_JOB_ID=123" in args
+    assert "ART_ALLOCATION_START=1795438800" in args
     assert args[-4:] == ["/gpu/bin/python", "-m", "artcurator", "hpc-worker"]
 
 

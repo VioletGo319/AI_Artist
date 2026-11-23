@@ -19,7 +19,7 @@ export type Artwork = {
 }
 
 export const asset = (file: string) => import.meta.env.BASE_URL + file
-const validId = /^[a-f0-9]{32}-(0[1-9]|1[0-6])$/
+const validId = /^[a-f0-9]{32}-(0[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-6])$/
 const fields = ['title', 'theme', 'palette', 'composition', 'style', 'prompt', 'model', 'approved_at'] as const
 const numeric = ['seed', 'steps', 'width', 'height'] as const
 

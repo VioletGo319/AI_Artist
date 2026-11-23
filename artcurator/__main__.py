@@ -14,7 +14,7 @@ from artcurator.mailer import service as mail
 from artcurator.mailer.transport import authorize
 from artcurator.scheduler.service import dry_run, reconcile_local, schedule, start_local
 from artcurator.scheduler.slurm import export_request, stage_request
-from artcurator.settings import Environment
+from artcurator.settings import Environment, MAX_CANDIDATES
 from artcurator.store import Busy, Store
 
 
@@ -22,7 +22,7 @@ def arguments(argv):
     parser = argparse.ArgumentParser(description="Private generation and human-approved publication.")
     commands = parser.add_subparsers(dest="command", required=True)
     gen = commands.add_parser("generate", help="Run one local daily batch.")
-    gen.add_argument("--count", type=int, choices=range(1, 17))
+    gen.add_argument("--count", type=int, choices=range(1, MAX_CANDIDATES + 1))
     gen.add_argument("--resume", action="store_true", help="Resume a saved, undelivered local batch.")
     gen.add_argument("--day", type=date.fromisoformat, help="Historical checkpoint day for --resume.")
     for command in ("preview-email", "send-email", "mock-reply"):
@@ -51,8 +51,14 @@ def arguments(argv):
     commands.add_parser("gmail-status", help="Check OAuth setup without sending mail.").add_argument(
         "--connect", action="store_true", help="Verify the OAuth mailbox with a read-only profile request.")
     commands.add_parser("hpc-stage")
-    commands.add_parser("hpc-export").add_argument("--batch", required=True)
-    commands.add_parser("_expand").add_argument("--batch", required=True)
+    sub = commands.add_parser("hpc-export")
+    sub.add_argument("--batch", required=True)
+    sub.add_argument("--after", type=int, default=0)
+    sub.add_argument("--limit", type=int, default=None)
+    sub = commands.add_parser("_expand")
+    sub.add_argument("--batch", required=True)
+    sub.add_argument("--start", type=int, default=1)
+    sub.add_argument("--limit", type=int, default=MAX_CANDIDATES)
     for command in ("_worker", "hpc-worker"):
         sub = commands.add_parser(command)
         sub.add_argument("--batch", required=True)
@@ -175,14 +181,14 @@ def main(argv=None):
         elif command == "tick":
             tick(store, env, now, args.mock)
         elif command == "hpc-stage":
-            payload = sys.stdin.buffer.read(256_001)
-            if len(payload) > 256_000:
+            payload = sys.stdin.buffer.read(2_000_001)
+            if len(payload) > 2_000_000:
                 raise ValueError("Oversized Slurm plan.")
             print(stage_request(store, payload).id)
         elif command == "hpc-export":
-            sys.stdout.buffer.write(export_request(store, args.batch))
+            sys.stdout.buffer.write(export_request(store, args.batch, args.after, args.limit))
         elif command == "_expand":
-            expand(store, env, get_plan(store, args.batch))
+            expand(store, env, get_plan(store, args.batch), args.start, args.limit)
         elif command in {"hpc-worker", "_worker"}:
             hpc = command == "hpc-worker"
             plan = get_plan(store, args.batch)
@@ -194,6 +200,12 @@ def main(argv=None):
             signal.signal(signal.SIGTERM, interrupt_worker)
             signal.signal(signal.SIGUSR1, interrupt_worker)
             deadline = min(now + timedelta(minutes=env.settings.scheduler.runtime_minutes), args.deadline)
+            if hpc and os.getenv("ART_ALLOCATION_START"):
+                # Count container startup/model loading inside the allocation budget.
+                allocated = datetime.fromtimestamp(int(os.environ["ART_ALLOCATION_START"]), timezone.utc)
+                if allocated > now:
+                    raise ValueError("Allocation start cannot be in the future.")
+                deadline = min(deadline, allocated + timedelta(minutes=env.settings.scheduler.runtime_minutes))
             signal.signal(signal.SIGALRM, interrupt_worker)
             signal.setitimer(signal.ITIMER_REAL, max(.001, (deadline - now).total_seconds()))
             try:

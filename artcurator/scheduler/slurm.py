@@ -12,11 +12,11 @@ from PIL import Image
 
 from artcurator.generator.plan import Plan, save_plan
 from artcurator.generator.worker import directory, finalize, get_plan, persist_candidate, recover_written
-from artcurator.settings import MAX_RUNTIME_MINUTES
+from artcurator.settings import MAX_RUNTIME_MINUTES, MAX_CANDIDATES
 
 TOKEN = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]*")
 HOST = re.compile(r"(?:[A-Za-z0-9_][A-Za-z0-9_.-]*@)?[A-Za-z0-9][A-Za-z0-9_.-]*")
-MAX_ARCHIVE = 96_000_000
+MAX_ARCHIVE = 128_000_000
 
 
 class Slurm:
@@ -99,6 +99,29 @@ class Slurm:
     def retrieve(self, plan):
         return checked(self.worker("hpc-export", "--batch", plan.id), "retrieve")
 
+    def retrieve_pages(self, plan):
+        # Bound memory and SSH transfer size even when a time-budget batch is large.
+        after = 0
+        while after < len(plan.slots):
+            payload = checked(self.worker("hpc-export", "--batch", plan.id,
+                                          "--after", str(after), "--limit", "8"), "retrieve")
+            if len(payload) > MAX_ARCHIVE:
+                raise ValueError("Oversized Slurm archive page.")
+            with ZipFile(BytesIO(payload)) as archive:
+                info = archive.getinfo("index.json")
+                if info.file_size > 2_000_000:
+                    raise ValueError("Oversized Slurm archive index.")
+                manifest = json.loads(archive.read("index.json"))
+            slots = [row["slot"] for row in manifest["records"]]
+            if (manifest["batch"] != plan.id or len(slots) > 8
+                    or any(type(slot) is not int or not after < slot <= len(plan.slots) for slot in slots)
+                    or slots != sorted(set(slots))):
+                raise ValueError("Invalid Slurm archive pagination.")
+            yield payload
+            if len(slots) < 8:
+                break
+            after = slots[-1]
+
 
 def checked(result, action):
     if result.returncode:
@@ -120,14 +143,19 @@ def stage_request(store, payload):
     return plan
 
 
-def export_request(store, batch):
+def export_request(store, batch, after=0, limit=None):
+    if type(after) is not int or not 0 <= after <= MAX_CANDIDATES:
+        raise ValueError("Invalid export cursor.")
+    if limit is not None and (type(limit) is not int or not 1 <= limit <= 8):
+        raise ValueError("Export pages contain one to eight images.")
     plan = get_plan(store, batch)
     with store.lock("gpu-worker"):
         recover_written(store, plan)
         out = BytesIO()
         with ZipFile(out, "w", compression=ZIP_STORED) as archive, store.connect() as db:
             records = []
-            for row in db.execute("SELECT data,sha FROM works WHERE batch=? ORDER BY slot", (plan.id,)):
+            for row in db.execute("SELECT data,sha FROM works WHERE batch=? AND slot>? ORDER BY slot LIMIT ?",
+                                  (plan.id, after, limit or MAX_CANDIDATES)):
                 art = json.loads(row["data"])
                 raw = (directory(store, plan) / art["image"]).read_bytes()
                 if sha256(raw).hexdigest() != row["sha"]:
@@ -141,7 +169,7 @@ def export_request(store, batch):
         return out.getvalue()
 
 
-def import_results(store, plan, payload):
+def import_results(store, plan, payload, *, finalize_batch=True):
     if len(payload) > MAX_ARCHIVE:
         raise ValueError("Slurm archive exceeds the configured size.")
     with store.lock("gpu-worker"), ZipFile(BytesIO(payload)) as archive:
@@ -178,4 +206,4 @@ def import_results(store, plan, payload):
         for index, seed, prompt, image, stamp in prepared:
             persist_candidate(store, plan, index, seed, prompt, image,
                               directory(store, plan) / f"{index:02d}-{seed}.png", stamp)
-        return finalize(store, plan)
+        return finalize(store, plan) if finalize_batch else len(store.artworks(plan.id))

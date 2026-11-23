@@ -8,9 +8,10 @@ import subprocess
 from PIL import Image
 
 from artcurator.generator.worker import thumbnail
+from artcurator.settings import SLOT_PATTERN
 from artcurator.store import atomic, atomic_json
 
-WORK = re.compile(r"[a-f0-9]{32}-(?:0[1-9]|1[0-6])")
+WORK = re.compile(r"[a-f0-9]{32}-" + SLOT_PATTERN)
 FIELDS = ("id", "title", "theme", "palette", "composition", "style", "prompt", "seed", "model",
           "date", "generated_at", "steps", "width", "height")
 
@@ -87,7 +88,7 @@ def publish(store, env, mock=False, push=False):
             item = json.loads(row["data"])
             identity = item["id"]
             if (not WORK.fullmatch(identity) or not identity.startswith(row["batch"] + "-")
-                    or not re.fullmatch(r"[0-9]{2}-[0-9]+\.png", item["image"])):
+                    or not re.fullmatch(SLOT_PATTERN + r"-[0-9]+\.png", item["image"])):
                 raise ValueError("Invalid approved artwork path.")
             if item["mock"] and not mock:
                 continue

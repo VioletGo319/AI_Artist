@@ -1,5 +1,28 @@
 import { expect, test } from '@playwright/test'
 
+test('large-batch artwork numbers load, open, and persist in favorites', async ({ page }) => {
+  const artworks = [17, 100, 256].map((slot) => {
+    const id = `${'a'.repeat(32)}-${slot}`
+    return { id, title: `Storm Canyon ${slot}`, theme: 'Storm Canyon', palette: 'turquoise and gold',
+      composition: 'wide view', style: 'landscape', prompt: 'A luminous storm canyon', seed: slot,
+      model: 'Tongyi-MAI/Z-Image-Turbo', date: '2026-11-23', approved_at: '2026-11-23T14:00:00Z',
+      steps: 9, width: 1024, height: 1024, image: `gallery/art/${id}.png`, thumb: `gallery/thumbs/${id}.webp` }
+  })
+  await page.route('**/gallery/manifest.json', (route) => route.fulfill({ json: { version: 1, artworks } }))
+  await page.route(/\/gallery\/(art|thumbs)\/a{32}-/, (route) => route.fulfill({
+    contentType: 'image/svg+xml', body: '<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64"><rect width="64" height="64" fill="teal"/></svg>',
+  }))
+  await page.goto('http://127.0.0.1:4174/')
+  const cards = page.locator('#collection .tile')
+  await expect(cards).toHaveCount(3)
+  const card = cards.filter({ hasText: 'Storm Canyon 256' })
+  await card.getByRole('button', { name: 'Add to favorites' }).click()
+  await page.reload()
+  await expect(cards.filter({ hasText: 'Storm Canyon 256' }).getByRole('button', { name: 'Remove from favorites' })).toBeVisible()
+  await cards.filter({ hasText: 'Storm Canyon 256' }).locator('.tile-image a').click()
+  await expect(page.getByRole('heading', { name: 'Storm Canyon 256', level: 1 })).toBeVisible()
+})
+
 test('production build renders only the approved manifest', async ({ page }) => {
   const response = await page.request.get('http://127.0.0.1:4174/gallery/manifest.json')
   expect(response.ok()).toBeTruthy()

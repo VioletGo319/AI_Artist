@@ -3,10 +3,23 @@ from email import policy
 from email.utils import formatdate
 from html import escape
 import base64
+from io import BytesIO
 
 from PIL import Image
 
-from artcurator.generator.worker import thumbnail
+
+def mail_thumbnail(image):
+    """Keep every candidate visible without exceeding the one-email size budget."""
+    preview = image.convert("RGB")
+    preview.thumbnail((400, 400), Image.Resampling.LANCZOS)
+    while True:
+        out = BytesIO()
+        preview.save(out, "JPEG", quality=80, optimize=True)
+        payload = out.getvalue()
+        if len(payload) <= 32_000:
+            return payload
+        preview.thumbnail((max(1, int(preview.width * .8)), max(1, int(preview.height * .8))),
+                          Image.Resampling.LANCZOS)
 
 
 def subject(day):
@@ -27,17 +40,17 @@ def gallery_message(batch, artworks, delivery, folder, sender, preview=False):
         plain.append(f'{label} ({item["model"]})')
         content_id = f'{item["id"]}@artcurator.local'
         with Image.open(folder / item["thumb"]) as image:
-            thumb = thumbnail(image, 400, format="JPEG")
+            thumb = mail_thumbnail(image)
         encoded = base64.b64encode(thumb).decode()
         url = f"data:image/jpeg;base64,{encoded}" if preview else f"cid:{content_id}"
         embedded.append((content_id, thumb))
-        rows.append(f'<tr><td style="padding:18px 0;border-top:1px solid #4c464d">'
+        rows.append('<tr><td>'
                     f'<img src="{url}" alt="{escape(label)}" width="360" '
-                    f'style="width:100%;max-width:360px;height:auto;display:block;border-radius:6px">'
-                    f'<p style="margin:11px 0 2px"><strong>{escape(label)}</strong></p>'
-                    f'<p style="margin:0;color:#b9b1ba">{escape(item["model"])}</p></td></tr>')
+                    f'style="max-width:100%;height:auto">'
+                    f'<p><strong>{escape(label)}</strong></p></td></tr>')
     instructions = "Reply with numbers such as 05, 01,03,05 or 01；03；05. English/Chinese commas and semicolons are accepted. APPROVE: ALL and SKIP also work."
     token = f'Batch ID: {batch["id"]} · {delivery["token"]}'
+    models = escape(", ".join(sorted({item["model"] for item in artworks})))
     mail.set_content("\n".join([subject(batch["day"]), "", *plain, "", instructions, token]))
     html = f"""<!doctype html>
 <html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -47,6 +60,8 @@ def gallery_message(batch, artworks, delivery, folder, sender, preview=False):
 <p style="color:#cdb78b;letter-spacing:.18em;text-transform:uppercase">AI Art Curator</p>
 <h1 style="font:48px Georgia,serif;margin:.2em 0">Daily Gallery</h1>
 <p style="color:#ccc1ce">{escape(batch["day"])}</p>
+<p>{len(artworks)} candidates · Model: {models}</p>
+<p>Reply with numbers separated by commas or semicolons, such as <code>01,03,05</code>, or <code>APPROVE: ALL</code> / <code>SKIP</code>.</p>
 <table role="presentation" style="width:100%;border-collapse:collapse">{''.join(rows)}</table>
 <p>Reply directly to this email with one of these commands.</p>
 <p style="line-height:2"><code>05</code><br><code>01,03,05</code><br><code>01；03；05</code><br><code>APPROVE: ALL</code><br><code>SKIP</code></p>

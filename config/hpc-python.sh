@@ -43,6 +43,9 @@ if [[ -n "${SLURM_JOB_ID:-}" ]]; then
     python="$HPC_GPU_PYTHON"
     options+=(--nv --env "SLURM_JOB_ID=$SLURM_JOB_ID" --env "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES")
     options+=(--env "OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-4}")
+    if [[ "${ART_ALLOCATION_START:-}" =~ ^[0-9]+$ ]]; then
+        options+=(--env "ART_ALLOCATION_START=$ART_ALLOCATION_START")
+    fi
     if [[ -n "${TMPDIR:-}" && -d "$TMPDIR" ]]; then
         options+=(--bind "$TMPDIR:$TMPDIR" --env "TMPDIR=$TMPDIR")
     fi

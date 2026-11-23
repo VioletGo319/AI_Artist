@@ -2,6 +2,11 @@ timezone: America/New_York
 generation:
   backend: flux3
   count: 8
+  # Scheduled jobs continue until the time budget, not until eight images.
+  mode: time_budget
+  max_candidates: 256  # Defensive ceiling; the 30-minute time limit normally wins.
+  creative_direction: vivid_fantasy
+  cleanup_seconds: 60
   aspect_ratios: ["1:1"]
   cpu_offload: true
   upsampler_memory: 0.86

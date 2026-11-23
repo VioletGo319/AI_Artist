@@ -11,6 +11,8 @@ ROOT = Path(__file__).resolve().parent.parent
 FLUX = "black-forest-labs/flux-3-image-klein"
 Z_IMAGE = "Tongyi-MAI/Z-Image-Turbo"
 MAX_RUNTIME_MINUTES = 30
+MAX_CANDIDATES = 256
+SLOT_PATTERN = r"(?:0[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-6])"
 SIZES = {"1:1": (1024, 1024), "16:9": (1280, 720), "3:2": (1248, 832), "9:16": (720, 1280)}
 Backend = Literal["flux3", "diffusers", "mock"]
 
@@ -21,7 +23,11 @@ class Strict(BaseModel):
 
 class Generation(Strict):
     backend: Backend = "flux3"
-    count: int = Field(8, ge=1, le=16)
+    count: int = Field(8, ge=1, le=MAX_CANDIDATES)
+    mode: Literal["count", "time_budget"] = "count"
+    max_candidates: int = Field(MAX_CANDIDATES, ge=1, le=MAX_CANDIDATES)
+    creative_direction: Literal["balanced", "vivid_fantasy"] = "balanced"
+    cleanup_seconds: int = Field(60, ge=60, le=180)
     aspect_ratios: list[Literal["1:1", "16:9", "3:2", "9:16"]] = Field(default_factory=lambda: ["1:1"], min_length=1)
     cpu_offload: bool = True
     upsampler_memory: float = Field(.86, ge=.6, le=.95)
@@ -31,6 +37,9 @@ class Generation(Strict):
     diffusers_steps: int = Field(9, ge=1, le=100)
     diffusers_guidance: float = Field(0, ge=0, le=30)
     diffusers_license_approved: bool = False
+
+    def scheduled_count(self):
+        return self.max_candidates if self.mode == "time_budget" else self.count
 
     def parameters(self):
         if self.backend == "flux3":

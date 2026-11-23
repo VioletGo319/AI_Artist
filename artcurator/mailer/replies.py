@@ -2,7 +2,7 @@ from html.parser import HTMLParser
 import re
 
 
-NUMBERS = re.compile(r"[0-9]{1,2}(?:\s*[,，;；]\s*[0-9]{1,2})*")
+NUMBERS = re.compile(r"[0-9]{1,3}(?:\s*[,，;；]\s*[0-9]{1,3})*")
 APPROVE = re.compile(r"APPROVE\s*:\s*(.+)", re.I)
 QUOTED = re.compile(r"^(?:>|On .{1,400}wrote:\s*$|[-_]{2,}\s*(?:original message|forwarded message)|From:\s|--\s*$)", re.I)
 FORWARDED = re.compile(r"(?:forwarded message|begin forwarded)", re.I)

@@ -3,7 +3,7 @@ import shlex
 from types import SimpleNamespace
 
 from artcurator.generator.plan import make_plan
-from artcurator.generator.worker import finalize, get_plan, launch_local, recover_written
+from artcurator.generator.worker import finalize, generation_state, get_plan, launch_local, recover_written
 from artcurator.scheduler.slurm import Slurm, import_results
 from artcurator.store import Busy
 
@@ -109,7 +109,11 @@ def reconcile_slurm(store, client, now):
         if row["state"] == "submitting" and not expired:
             # SSH may have disconnected after Slurm accepted the request. Never submit again.
             continue
-        count = import_results(store, plan, client.retrieve(plan))
+        pages = client.retrieve_pages(plan) if hasattr(client, "retrieve_pages") else [client.retrieve(plan)]
+        generation_state(store, plan, "running")
+        for payload in pages:
+            import_results(store, plan, payload, finalize_batch=False)
+        count = finalize(store, plan)
         state = "ready" if count == len(plan.slots) else "partial" if count else "skipped"
         set_status(store, row["day"], state, f"Slurm complete; {count} candidates")
 
@@ -177,7 +181,7 @@ def schedule(store, env, now, client=None, resume_day=None):
             reconcile_slurm(store, client, now)
         if now < start:
             return "skipped: before today's scheduler window"
-        count = env.settings.generation.count
+        count = env.settings.generation.scheduled_count()
         if mode == "local":
             return start_local(store, env, now, day, count)
         return start_slurm(store, env, now, day, end, client, count, resume_day)

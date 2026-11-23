@@ -5,13 +5,32 @@ import json
 import os
 import subprocess
 import sys
+import time
 
 from PIL import Image, ImageStat
 
 from artcurator.generator.backends import NoGPU, check_cache, gpu, make_upsampler, renderer
 from artcurator.generator.plan import Plan
+from artcurator.settings import MAX_CANDIDATES
 from artcurator.generator.resources import release_cuda_cache, run_isolated
 from artcurator.store import atomic, utcnow
+
+
+class GenerationBudget:
+    """Reserve cleanup time and estimate the next attempt from observed wall time."""
+
+    def __init__(self, deadline, reserve):
+        self.deadline = deadline
+        self.reserve = reserve
+        self.durations = []
+
+    def can_start(self):
+        remaining = (self.deadline - datetime.now(timezone.utc)).total_seconds()
+        estimate = max(self.durations[-5:]) * 1.15 + 2 if self.durations else 60
+        return remaining > self.reserve + estimate
+
+    def record(self, elapsed):
+        self.durations.append(max(0, elapsed))
 
 
 def png(image):
@@ -52,11 +71,14 @@ def get_plan(store, batch):
     return Plan.model_validate_json(row["plan"])
 
 
-def expand(store, env, plan):
+def expand(store, env, plan, start=1, limit=MAX_CANDIDATES):
+    if not 1 <= start <= len(plan.slots) or not 1 <= limit <= MAX_CANDIDATES:
+        raise ValueError("Invalid prompt expansion page.")
     gpu()
     check_cache(env, plan)
     folder = directory(store, plan)
-    missing = [(i, slot) for i, slot in enumerate(plan.slots, 1) if not (folder / f"{i:02d}.prompt").is_file()]
+    missing = [(i, slot) for i, slot in enumerate(plan.slots, 1)
+               if start <= i < start + limit and not (folder / f"{i:02d}.prompt").is_file()]
     if not missing:
         return
     upsample = None
@@ -85,6 +107,15 @@ def finalize(store, plan):
     return count
 
 
+def expand_page(env, plan, deadline, start=1):
+    command = [sys.executable, "-m", "artcurator", "_expand", "--batch", plan.id,
+               "--start", str(start), "--limit", str(8 if plan.time_budget else MAX_CANDIDATES)]
+    remaining = (deadline - datetime.now(timezone.utc)).total_seconds() - plan.cleanup_seconds
+    if remaining <= 0:
+        raise InterruptedError("Prompt expansion stopped for cleanup.")
+    run_isolated(command, cwd=env.root, env=child_environment(env), check=True, timeout=remaining)
+
+
 def run(store, env, plan, deadline, hpc=False):
     if datetime.now(timezone.utc) >= deadline:
         return 0
@@ -93,6 +124,7 @@ def run(store, env, plan, deadline, hpc=False):
             if db.execute("SELECT 1 FROM deliveries WHERE batch=?", (plan.id,)).fetchone():
                 return len(store.artworks(plan.id))
         draw = None
+        budget = GenerationBudget(deadline, plan.cleanup_seconds) if plan.time_budget else None
         try:
             if plan.backend != "mock":
                 gpu(only_a100=hpc)
@@ -101,30 +133,43 @@ def run(store, env, plan, deadline, hpc=False):
             complete = {art["slot"] for art in store.artworks(plan.id)}
             if len(complete) == len(plan.slots):
                 return finalize(store, plan)
+            if budget and not budget.can_start():
+                return finalize(store, plan)
             generation_state(store, plan, "running")
             folder = directory(store, plan)
             folder.mkdir(parents=True, mode=0o700, exist_ok=True)
             if plan.backend == "flux3":
-                command = [sys.executable, "-m", "artcurator", "_expand", "--batch", plan.id]
-                run_isolated(command, cwd=env.root, env=child_environment(env), check=True,
-                               timeout=max(1, (deadline - datetime.now(timezone.utc)).total_seconds()))
+                first_missing = next(i for i in range(1, len(plan.slots) + 1) if i not in complete)
+                expand_page(env, plan, deadline, first_missing)
             draw = renderer(env, plan)
             for i, slot in enumerate(plan.slots, 1):
                 if i in complete:
                     continue
-                if datetime.now(timezone.utc) >= deadline:
+                if datetime.now(timezone.utc) >= deadline or (budget and not budget.can_start()):
                     break
+                if plan.backend == "flux3" and not (folder / f"{i:02d}.prompt").is_file():
+                    # Keep the upsampler and renderer in separate GPU phases, in
+                    # small pages rather than expanding hundreds of unused prompts.
+                    draw = None
+                    release_cuda_cache()
+                    expand_page(env, plan, deadline, i)
+                    draw = renderer(env, plan)
                 prompt = (folder / f"{i:02d}.prompt").read_text() if plan.backend == "flux3" else slot.prompt
                 for seed in slot.seeds:
-                    if datetime.now(timezone.utc) >= deadline:
+                    if datetime.now(timezone.utc) >= deadline or (budget and not budget.can_start()):
                         break
+                    started = time.monotonic()
                     checkpoint = folder / f"{i:02d}-{seed}.png"
                     if checkpoint.is_file():
                         with Image.open(checkpoint) as saved:
                             image = saved.convert("RGB")
                     else:
                         image = draw(prompt, seed, slot.width, slot.height).convert("RGB")
-                    if persist_candidate(store, plan, i, seed, prompt, image, checkpoint):
+                    accepted = persist_candidate(store, plan, i, seed, prompt, image, checkpoint)
+                    if budget:
+                        budget.record(time.monotonic() - started)
+                    if accepted:
+                        print(f"Saved candidate {i:02d}; total={len(store.artworks(plan.id))}", flush=True)
                         break
         except NoGPU:
             raise
