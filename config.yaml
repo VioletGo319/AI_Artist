@@ -25,6 +25,8 @@ scheduler:
   start_hour: 8
   runtime_minutes: 30
   admission_minutes: 10
+  # A second attempt is allowed only after accounting proves zero allocation.
+  max_submissions: 2
   cpus: 8
   memory: 64G
 mail:

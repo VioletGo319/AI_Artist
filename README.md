@@ -2,7 +2,7 @@
 
 **AI Art Museum — Curated by Human, Created by AI**
 
-A private AI art museum with generation scheduled from a personal device, human approval by email, and a static public gallery. The default model backend is FLUX 3 Image Klein. Production generation uses one authorized HPC A100 GPU, with at most one job per day and a maximum runtime of 30 minutes. There is no automatic fallback to a local GPU.
+A private AI art museum with generation scheduled from a personal device, human approval by email, and a static public gallery. The default model backend is FLUX 3 Image Klein. Production generation uses one authorized HPC A100 GPU for at most 30 minutes per day. The configured policy permits one additional submission only when Slurm accounting proves the first job never received an allocation. There is no automatic fallback to a local GPU.
 
 The public gallery starts empty. Candidate images, raw email, batch identifiers, approval records, and model weights are stored privately. Only explicitly approved artwork is published.
 
@@ -125,7 +125,9 @@ Set `ART_BACKEND=diffusers` on the private scheduler and `HPC_GPU_PYTHON` to the
 
 ### Daily limits and resource release
 
-One SQLite schedule record is shared by all attempts for a local calendar date. Normal scheduling invokes real `sbatch` at most once per day, with a maximum cumulative GPU runtime of 30 minutes. The default request is one A100, a 30-minute wall-clock limit, and approximately ten minutes for queue admission. The scheduler shortens the window near midnight, skips an unsuccessful day, and cancels expired jobs during subsequent reconciliation. Preempted jobs are not automatically requeued.
+One SQLite schedule record is shared by all attempts for a local calendar date. `scheduler.max_submissions: 2` enables a single fallback; setting it to `1` restores the original one-submission policy. The first request uses one A100, a 30-minute wall-clock limit, and ten minutes for queue admission. After that admission window, reconciliation cancels only a still-pending job, never a running one. A second request is allowed only after the first job is terminal and its exact job ID/name, elapsed time, allocated nodes, node list, and allocated TRES prove that it never received any allocation. Zero elapsed time alone is insufficient. Missing or ambiguous accounting, an uncertain submission, saved candidates, or a delivered batch cannot enable a fallback.
+
+The fallback may queue until the last same-day start (23:30 for a 30-minute job), with a completion deadline at midnight. Its reservation, first-job evidence, and second job ID are retained in `schedule_fallbacks`; crashes or repeated ticks cannot cause a third submission. Once either attempt has used a GPU, no fallback is permitted, so the cumulative daily GPU runtime remains at most 30 minutes. Reconciliation cancels expired jobs and jobs carry both a Slurm deadline and a worker date guard. The controller must remain online to enforce cancellation promptly. Preempted jobs are not automatically requeued. With fallback enabled, a full runtime plus admission window must remain for the first submission; otherwise the day is skipped.
 
 The private device makes short SSH calls to reconcile state and retrieves completed candidates after the job exits. No persistent polling process is needed on the login node.
 

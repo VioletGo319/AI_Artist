@@ -1,11 +1,12 @@
 from datetime import datetime, time, timedelta, timezone
+import json
 import shlex
 from types import SimpleNamespace
 
 from artcurator.generator.plan import make_plan
 from artcurator.generator.worker import finalize, generation_state, get_plan, launch_local, recover_written
 from artcurator.scheduler.slurm import Slurm, import_results
-from artcurator.store import Busy
+from artcurator.store import Busy, utcnow
 
 
 def window(env, now):
@@ -31,6 +32,8 @@ def set_status(store, day, state, detail="", job=None):
     with store.connect(write=True) as db:
         db.execute("UPDATE schedules SET state=?,detail=?,job=COALESCE(?,job) WHERE day=?",
                    (state, detail[:1000], job, day))
+        if job:
+            db.execute("UPDATE schedule_fallbacks SET second_job=? WHERE day=?", (job, day))
 
 
 def claim(store, day, plan, mode, deadline, state):
@@ -88,7 +91,7 @@ def start_local(store, env, now, day, count, resume=False, resume_day=None):
     return f"{state}: {saved} candidates" + (f" (worker exit {code})" if code else "")
 
 
-def reconcile_slurm(store, client, now):
+def reconcile_slurm(store, client, now, env=None):
     with store.connect() as db:
         pending = db.execute("""SELECT * FROM schedules WHERE mode='slurm'
                                 AND state IN ('staging','submitting','queued') ORDER BY day""").fetchall()
@@ -104,6 +107,13 @@ def reconcile_slurm(store, client, now):
             if expired:
                 client.cancel(jobs)
             else:
+                if env and env.settings.scheduler.max_submissions == 2:
+                    # First attempt: ten-minute admission window. Fallback: up to
+                    # the last same-day start. Never cancel a running allocation here.
+                    cutoff = datetime.fromisoformat(row["deadline"]) - timedelta(
+                        minutes=env.settings.scheduler.runtime_minutes)
+                    if now >= cutoff:
+                        client.cancel_pending(plan, jobs)
                 set_status(store, row["day"], "queued", "Slurm has the job", jobs[0])
             continue
         if row["state"] == "submitting" and not expired:
@@ -118,16 +128,54 @@ def reconcile_slurm(store, client, now):
         set_status(store, row["day"], state, f"Slurm complete; {count} candidates")
 
 
+def start_fallback(store, env, now, day, end, client, previous):
+    if (env.settings.scheduler.max_submissions != 2 or previous["mode"] != "slurm"
+            or previous["state"] != "skipped" or not previous["job"] or not previous["batch"]):
+        return "skipped: daily GPU attempt already recorded"
+    with store.connect() as db:
+        if db.execute("SELECT 1 FROM schedule_fallbacks WHERE day=?", (day,)).fetchone():
+            return "skipped: both daily submission attempts already recorded"
+        if db.execute("SELECT 1 FROM deliveries WHERE batch=?", (previous["batch"],)).fetchone():
+            return "skipped: delivered batches cannot be retried"
+    plan = get_plan(store, previous["batch"])
+    if store.artworks(plan.id):
+        return "skipped: saved candidates exist; no fallback allocation"
+    runtime = env.settings.scheduler.runtime_minutes
+    if now + timedelta(minutes=runtime + 1) >= end:
+        return "skipped: no same-day fallback execution window"
+    if client.active(plan):
+        return "waiting: a batch allocation still exists; no fallback"
+    receipt = client.unallocated_receipt(plan, previous["job"])
+    if receipt is None:
+        return "skipped: accounting does not prove the first job was never allocated"
+    with store.connect(write=True) as db:
+        inserted = db.execute("""INSERT OR IGNORE INTO schedule_fallbacks
+            (day,batch,first_job,first_schedule,accounting,deadline,created)
+            VALUES (?,?,?,?,?,?,?)""", (day, plan.id, previous["job"], json.dumps(dict(previous)),
+                                      json.dumps(receipt), end.isoformat(), utcnow())).rowcount
+        if not inserted:
+            return "skipped: fallback already reserved"
+        db.execute("UPDATE schedules SET state='staging',job=NULL,deadline=?,detail=? WHERE day=?",
+                   (end.isoformat(), "Fallback 2/2 reserved after verified zero allocation.", day))
+        db.execute("UPDATE batches SET state='running' WHERE id=?", (plan.id,))
+    # The reservation survives crashes and ambiguous SSH acceptance. Never repeat it.
+    return submit_staged(store, plan, day, end, runtime, client)
+
+
 def start_slurm(store, env, now, day, end, client, count, resume_day=None):
     with store.connect() as db:
-        if db.execute("SELECT 1 FROM schedules WHERE day=?", (day,)).fetchone():
-            return "skipped: daily GPU attempt already recorded"
-        if db.execute("""SELECT 1 FROM schedules WHERE mode='slurm'
-                         AND state IN ('submitting','queued') LIMIT 1""").fetchone():
+        previous = db.execute("SELECT * FROM schedules WHERE day=?", (day,)).fetchone()
+        other_active = db.execute("""SELECT 1 FROM schedules WHERE mode='slurm' AND day!=?
+                         AND state IN ('submitting','queued') LIMIT 1""", (day,)).fetchone()
+        if other_active:
             return "waiting: prior Slurm attempt is being reconciled"
+    if previous:
+        return start_fallback(store, env, now, day, end, client, previous)
     wait = env.settings.scheduler.admission_minutes
     minutes_left = int((end - now).total_seconds() // 60)
     runtime = min(env.settings.scheduler.runtime_minutes, minutes_left - wait)
+    if env.settings.scheduler.max_submissions == 2 and runtime < env.settings.scheduler.runtime_minutes:
+        runtime = 0
     if runtime < 1:
         with store.connect(write=True) as db:
             db.execute("INSERT OR IGNORE INTO schedules(day,mode,state,detail) VALUES (?,'slurm','skipped',?)",
@@ -151,6 +199,10 @@ def start_slurm(store, env, now, day, end, client, count, resume_day=None):
             raise ValueError("Slurm requires a fresh real-model batch.")
         if not claim(store, day, plan, "slurm", deadline, "staging"):
             return "skipped: daily GPU attempt already recorded"
+    return submit_staged(store, plan, day, deadline, runtime, client)
+
+
+def submit_staged(store, plan, day, deadline, runtime, client):
     try:
         client.stage(plan)
     except (RuntimeError, OSError):
@@ -178,7 +230,7 @@ def schedule(store, env, now, client=None, resume_day=None):
             if not all(env.flag(key) for key in ("HPC_ENABLED", "HPC_AUTHORIZED", "HPC_OPPORTUNISTIC")):
                 return "skipped: authorized opportunistic Slurm access is disabled"
             client = client or Slurm(env)
-            reconcile_slurm(store, client, now)
+            reconcile_slurm(store, client, now, env)
         if now < start:
             return "skipped: before today's scheduler window"
         count = env.settings.generation.scheduled_count()

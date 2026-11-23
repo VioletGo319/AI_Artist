@@ -21,6 +21,11 @@ CREATE TABLE IF NOT EXISTS schedules (
   day TEXT PRIMARY KEY, batch TEXT, mode TEXT NOT NULL, state TEXT NOT NULL,
   job TEXT, deadline TEXT, detail TEXT
 );
+CREATE TABLE IF NOT EXISTS schedule_fallbacks (
+  day TEXT PRIMARY KEY, batch TEXT NOT NULL, first_job TEXT NOT NULL,
+  first_schedule TEXT NOT NULL, accounting TEXT NOT NULL,
+  second_job TEXT, deadline TEXT NOT NULL, created TEXT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS deliveries (
   batch TEXT PRIMARY KEY REFERENCES batches(id), medium TEXT NOT NULL, recipient TEXT NOT NULL,
   approver TEXT NOT NULL, token TEXT NOT NULL UNIQUE, message TEXT NOT NULL UNIQUE,

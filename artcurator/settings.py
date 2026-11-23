@@ -60,6 +60,7 @@ class Schedule(Strict):
     start_hour: int = Field(8, ge=0, le=23)
     runtime_minutes: int = Field(MAX_RUNTIME_MINUTES, ge=1, le=MAX_RUNTIME_MINUTES)
     admission_minutes: int = Field(10, ge=1, le=60)
+    max_submissions: Literal[1, 2] = 1
     cpus: int = Field(8, ge=1, le=64)
     memory: str = Field("64G", pattern=r"^[1-9][0-9]*[MG]$")
 

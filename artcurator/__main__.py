@@ -80,6 +80,8 @@ def report(store, env):
         result = {name: db.execute(f"SELECT count(*) FROM {name}").fetchone()[0]
                   for name in ("batches", "works", "deliveries", "approvals")}
         result["schedule"] = [dict(row) for row in db.execute("SELECT * FROM schedules ORDER BY day DESC LIMIT 8")]
+        result["fallbacks"] = [dict(row) for row in db.execute(
+            "SELECT day,first_job,second_job,deadline FROM schedule_fallbacks ORDER BY day DESC LIMIT 8")]
         result["mail"] = [dict(row) for row in db.execute("""SELECT b.day,d.medium,d.status,d.attempts,d.decision
                        FROM deliveries d JOIN batches b ON b.id=d.batch ORDER BY b.day DESC LIMIT 8""")]
     result.update(backend=env.settings.generation.backend, gmail=env.flag("GMAIL_ENABLED"),

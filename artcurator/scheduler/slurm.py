@@ -96,6 +96,31 @@ class Slurm:
         if jobs:
             checked(self.ssh(["scancel", *jobs]), "cancel")
 
+    def cancel_pending(self, plan, jobs):
+        if any(not re.fullmatch(r"[0-9]+", job) for job in jobs):
+            raise RuntimeError("Unexpected Slurm job ID.")
+        if jobs:
+            checked(self.ssh(["scancel", "--state=PENDING", f"--name=ac-{plan.id}", *jobs]), "cancel pending")
+
+    def unallocated_receipt(self, plan, job):
+        """Fail closed: zero elapsed alone does not prove that a GPU was never allocated."""
+        if not re.fullmatch(r"[0-9]+", job):
+            raise ValueError("Invalid accounting job ID.")
+        result = self.ssh(["sacct", "-j", job, "-nP",
+                           "--format=JobID,JobName%64,State%32,ElapsedRaw,AllocNodes,NodeList%256,AllocTRES%256"])
+        lines = [line.split("|") for line in checked(result, "accounting").decode().splitlines()]
+        matching = [row for row in lines if row and row[0].strip() == job]
+        if len(matching) != 1 or len(matching[0]) < 7:
+            return None
+        values = [value.strip() for value in matching[0][:7]]
+        identity, name, state, seconds, nodes, node_list, tres = values
+        if (name != f"ac-{plan.id}" or not state or state.split()[0] not in {"CANCELLED", "DEADLINE"}
+                or seconds != "0" or nodes != "0" or tres
+                or node_list not in {"", "None assigned", "None", "(null)"}):
+            return None
+        return dict(job=identity, name=name, state=state, elapsed_seconds=0,
+                    allocated_nodes=0, node_list=node_list, allocated_tres=tres)
+
     def retrieve(self, plan):
         return checked(self.worker("hpc-export", "--batch", plan.id), "retrieve")
 
