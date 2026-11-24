@@ -9,7 +9,7 @@ import json
 
 
 def caption_messages(folder, prompt):
-    system = json.loads((folder / "system_prompts.json").read_text())["t2i"]
+    system = json.loads((folder / "system_prompts.json").read_text(encoding="utf-8"))["t2i"]
     if not isinstance(system, str) or not system.strip():
         raise ValueError("Official PUP t2i system prompt is missing.")
     return [{"role": "system", "content": system}, {"role": "user", "content": prompt}]

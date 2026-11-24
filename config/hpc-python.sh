@@ -76,4 +76,6 @@ options+=(--env "ART_WEIGHTS_DIR=$curator_root/weights" --env HF_HUB_OFFLINE=1 -
 options+=(--env "HF_HOME=$curator_root/private/huggingface" --env "XDG_CACHE_HOME=$curator_root/work/cache")
 options+=(--env "TORCH_HOME=$curator_root/work/torch" --env "TRITON_CACHE_DIR=$curator_root/work/triton")
 options+=(--env "CUDA_CACHE_PATH=$curator_root/work/cuda-cache" --env PYTHONNOUSERSITE=1)
+# CentOS 7 may not provide C.UTF-8; never let its ASCII locale select file I/O.
+options+=(--env PYTHONUTF8=1 --env PYTHONIOENCODING=utf-8)
 exec "$HPC_APPTAINER" "${options[@]}" "$image" "$python" "$@"

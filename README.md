@@ -69,13 +69,15 @@ The official repository describes a combined model footprint of approximately 52
 
 FLUX defaults to 16-step distilled inference, native BF16, no CFG, and 1024×1024 output. Configure `generation.aspect_ratios` to use `1:1`, `16:9` (1280×720), `3:2` (1248×832), or `9:16` (720×1280).
 
-The Upsampler runs in a separate process and saves each expanded prompt. After that process exits, the inference path moves the official text encoder, DiT, and VAE onto the GPU separately, using the official sampling and decoding functions to reduce simultaneous GPU residency. The A100 path does not enable FP8 or NVFP4. Peak GPU memory and full inference still require an authorized A100 test. [BFL memory and staged-inference guidance](https://github.com/black-forest-labs/flux-3-image-klein#smaller-gpus)
+The Upsampler runs in a separate process and saves each expanded prompt. After that process exits, the inference path moves the official text encoder, DiT, and VAE onto the GPU separately, using the official sampling and decoding functions to reduce simultaneous GPU residency. The A100 path does not enable FP8 or NVFP4. An initial A100 80GB run saved one candidate; sustained throughput and A100 40GB operation still require validation. [BFL memory and staged-inference guidance](https://github.com/black-forest-labs/flux-3-image-klein#smaller-gpus)
 
 ### FLUX on the Caviness CUDA 12.4 stack
 
 The current quality-first target is **FLUX 3 Klein, BF16, 16 steps, official Prompt Upsampler weights**. `generation.upsampler_backend: transformers` runs BFL's `flux-3-image-klein-pup` Qwen3.5 model with its unmodified `t2i` system prompt through a Transformers adapter. It is **not the upstream vLLM runtime** and is not claimed to produce numerically identical captions. It keeps greedy decoding, the 3584-token output limit, thinking disabled, and a generated-token presence penalty. There is no raw-prompt or substitute-model fallback on PUP failure. Set `upsampler_backend: vllm` only on a separately prepared compatible upstream environment.
 
 The compatibility profile uses Python 3.12, PyTorch 2.6.0+cu124, Torchvision 0.21.0+cu124, Transformers 5.24.0, Accelerate 1.16.0 and Safetensors 0.8.0. Keep the official source pinned to `bfc8889a4497f846416f253a3972a1941ac698b9` on `PYTHONPATH`; do not install its CUDA 13 dependency set into this profile. `requirements-flux-compat.txt` records the dependency versions. CPU-only imports, an official FLUX attention primitive, and tiny random-weight Qwen3.5 generation have passed in the Caviness container. This does **not** validate the full PUP weights, GPU memory, full-model speed, or A100 inference. Without optional optimized Qwen kernels, Transformers uses slower reference implementations; measure actual throughput before adding compiled kernels.
+
+On November 24, the first real FLUX/PUP allocation used one A100 80GB, saved one 16-step candidate, then stopped when an expanded prompt contained non-ASCII punctuation. Slurm recorded 523 seconds for the job and 526 seconds for its extern step; the allocation was released. Prompt/checkpoint reads now specify UTF-8, and the container explicitly enables Python UTF-8 mode. A CPU mock regression under a forced ASCII locale verifies both generation and checkpoint recovery. It does not count as a successful GPU rerun; no additional allocation was requested after this failure.
 
 Install the matching Torch/Torchvision pair from the CUDA 12.4 wheel index before the remaining compatibility requirements. [Official PyTorch version matrix](https://pytorch.org/get-started/previous-versions/#v260).
 
@@ -98,7 +100,7 @@ rsync -av --exclude='.cache/' weights/flux-3-image-klein weights/pup \
   caviness-curator:/work/weiqian_stat/users/xwyu/ai-art-curator/weights/
 ```
 
-The download helper pins both model revisions and reuses cached files. Transfer only the two weight directories, never `.env`, OAuth files or the Hugging Face token cache. The selected pinned BF16/PUP artifacts total 39,160,700,171 bytes (36.47 GiB across 32 files). As of November 24, 2026, these files are cached and checksum-verified on the configured HPC host. CPU dependency, offline processor/template, and cache checks pass; full A100 inference remains untested.
+The download helper pins both model revisions and reuses cached files. Transfer only the two weight directories, never `.env`, OAuth files or the Hugging Face token cache. The selected pinned BF16/PUP artifacts total 39,160,700,171 bytes (36.47 GiB across 32 files). As of November 24, 2026, these files are cached and checksum-verified on the configured HPC host. CPU dependency, offline processor/template, and cache checks pass. The first A100 80GB run saved one candidate before an ASCII-locale prompt-read failure; sustained operation and A100 40GB remain unvalidated.
 
 If the private device lacks space for the 36.47 GiB cache, use the streaming alternative **instead of** `download-flux.py --weights` and `rsync`:
 

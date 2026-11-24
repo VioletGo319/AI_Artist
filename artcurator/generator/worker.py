@@ -154,7 +154,7 @@ def run(store, env, plan, deadline, hpc=False):
                     release_cuda_cache()
                     expand_page(env, plan, deadline, i)
                     draw = renderer(env, plan)
-                prompt = (folder / f"{i:02d}.prompt").read_text() if plan.backend == "flux3" else slot.prompt
+                prompt = (folder / f"{i:02d}.prompt").read_text(encoding="utf-8") if plan.backend == "flux3" else slot.prompt
                 for seed in slot.seeds:
                     if datetime.now(timezone.utc) >= deadline or (budget and not budget.can_start()):
                         break
@@ -193,7 +193,7 @@ def recover_written(store, plan):
             path = folder / f"{index:02d}-{seed}.png"
             if not path.is_file():
                 continue
-            prompt = (folder / f"{index:02d}.prompt").read_text() if plan.backend == "flux3" else slot.prompt
+            prompt = (folder / f"{index:02d}.prompt").read_text(encoding="utf-8") if plan.backend == "flux3" else slot.prompt
             stamp = datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat()
             with Image.open(path) as image:
                 if persist_candidate(store, plan, index, seed, prompt, image.convert("RGB"), path, stamp):

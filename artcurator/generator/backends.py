@@ -43,7 +43,7 @@ def verify_shards(directory: Path):
 
     files = set()
     for index in directory.glob("*.safetensors.index.json"):
-        files.update(json.loads(index.read_text())["weight_map"].values())
+        files.update(json.loads(index.read_text(encoding="utf-8"))["weight_map"].values())
     if not files:
         files = {path.name for path in directory.glob("*.safetensors")}
     return bool(files) and all((directory / file).is_file() and (directory / file).stat().st_size > 0
