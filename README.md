@@ -75,9 +75,16 @@ The Upsampler runs in a separate process and saves each expanded prompt. After t
 
 The current quality-first target is **FLUX 3 Klein, BF16, 16 steps, official Prompt Upsampler weights**. `generation.upsampler_backend: transformers` runs BFL's `flux-3-image-klein-pup` Qwen3.5 model with its unmodified `t2i` system prompt through a Transformers adapter. It is **not the upstream vLLM runtime** and is not claimed to produce numerically identical captions. It keeps greedy decoding, the 3584-token output limit, thinking disabled, and a generated-token presence penalty. There is no raw-prompt or substitute-model fallback on PUP failure. Set `upsampler_backend: vllm` only on a separately prepared compatible upstream environment.
 
-The compatibility profile uses Python 3.12, PyTorch 2.6.0+cu124, Transformers 5.24.0, Accelerate 1.16.0 and Safetensors 0.8.0. Keep the official source pinned to `bfc8889a4497f846416f253a3972a1941ac698b9` on `PYTHONPATH`; do not install its CUDA 13 dependency set into this profile. `requirements-flux-compat.txt` records the dependency versions. CPU-only imports, an official FLUX attention primitive, and tiny random-weight Qwen3.5 generation have passed in the Caviness container. This does **not** validate the full PUP weights, GPU memory, full-model speed, or A100 inference. Without optional optimized Qwen kernels, Transformers uses slower reference implementations; measure actual throughput before adding compiled kernels.
+The compatibility profile uses Python 3.12, PyTorch 2.6.0+cu124, Torchvision 0.21.0+cu124, Transformers 5.24.0, Accelerate 1.16.0 and Safetensors 0.8.0. Keep the official source pinned to `bfc8889a4497f846416f253a3972a1941ac698b9` on `PYTHONPATH`; do not install its CUDA 13 dependency set into this profile. `requirements-flux-compat.txt` records the dependency versions. CPU-only imports, an official FLUX attention primitive, and tiny random-weight Qwen3.5 generation have passed in the Caviness container. This does **not** validate the full PUP weights, GPU memory, full-model speed, or A100 inference. Without optional optimized Qwen kernels, Transformers uses slower reference implementations; measure actual throughput before adding compiled kernels.
 
-On the configured host, `config/hpc-flux-python.sh` adds `work/flux3-bfc8889/src` to `PYTHONPATH` and reuses the existing `.venv-zimage` dependencies without modifying them. The name of that base environment does not select the image model. `HPC_GPU_PYTHON` in the HPC-only runtime file points to this overlay; `HPC_CONTROL_PYTHON` remains separate. To reproduce the source overlay, clone the official repository into `work/flux3-bfc8889` and check out the pinned revision above, then run the CPU preflight. On a new host, prepare the CUDA 12.4 dependency environment from `requirements-flux-compat.txt` first.
+Install the matching Torch/Torchvision pair from the CUDA 12.4 wheel index before the remaining compatibility requirements. [Official PyTorch version matrix](https://pytorch.org/get-started/previous-versions/#v260).
+
+```bash
+python -m pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cu124
+python -m pip install -r requirements-flux-compat.txt
+```
+
+On the configured host, `config/hpc-flux-python.sh` adds `work/flux3-bfc8889/src` to `PYTHONPATH` and reuses the existing `.venv-zimage` CUDA 12.4 environment with the matching Torchvision dependency. The name of that base environment does not select the image model. `HPC_GPU_PYTHON` in the HPC-only runtime file points to this overlay; `HPC_CONTROL_PYTHON` remains separate. To reproduce the source overlay, clone the official repository into `work/flux3-bfc8889` and check out the pinned revision above, then run the CPU preflight. On a new host, prepare the CUDA 12.4 dependency environment from `requirements-flux-compat.txt` first.
 
 Accept access terms on the [official FLUX model page](https://huggingface.co/black-forest-labs/flux-3-image-klein), create a read-only Hugging Face token with permission for that model, then run on the **private device** (never paste the token into chat):
 
@@ -91,9 +98,9 @@ rsync -av --exclude='.cache/' weights/flux-3-image-klein weights/pup \
   caviness-curator:/work/weiqian_stat/users/xwyu/ai-art-curator/weights/
 ```
 
-The download helper pins both model revisions and reuses cached files. Transfer only the two weight directories, never `.env`, OAuth files or the Hugging Face token cache. Approximate upstream combined download size is 52 GB. The model and PUP are not yet cached on the current HPC host.
+The download helper pins both model revisions and reuses cached files. Transfer only the two weight directories, never `.env`, OAuth files or the Hugging Face token cache. The selected pinned BF16/PUP artifacts total 39,160,700,171 bytes (36.47 GiB across 32 files). As of November 24, 2026, these files are cached and checksum-verified on the configured HPC host. CPU dependency, offline processor/template, and cache checks pass; full A100 inference remains untested.
 
-If the private device lacks 52 GB of free space, use the streaming alternative **instead of** `download-flux.py --weights` and `rsync`:
+If the private device lacks space for the 36.47 GiB cache, use the streaming alternative **instead of** `download-flux.py --weights` and `rsync`:
 
 ```bash
 export HF_HOME="$PWD/private/huggingface"
@@ -103,7 +110,7 @@ python config/stream-flux.py --host caviness-curator \
 
 It authenticates to Hugging Face locally and streams bounded chunks over SSH; no long-lived token is sent to HPC. Remote files are checked against the pinned Hub size and SHA-256 (LFS) or Git blob hash before atomic rename. Interrupted `.part` files resume with HTTP Range. Cached complete files are verified and skipped. This step consumes network/storage, not a GPU allocation. Ensure sufficient **remote** quota before starting.
 
-`config/hpc-python.sh --model-check -m artcurator model-check --dependencies-only` loads the model Python environment **without `--nv`** and clears GPU visibility. Omit `--dependencies-only` to also check the cached weights and official PUP system prompt. The scheduler runs this CPU preflight before creating a new daily claim, so missing weights or incompatible imports cannot spend a GPU allocation. A passed preflight is explicitly labeled `gpu_inference: not_tested`. Run the first real full-model validation in a normal authorized daily slot; it shares the 30-minute budget and cannot trigger a retry after any GPU allocation.
+`config/hpc-python.sh --model-check -m artcurator model-check --dependencies-only` loads the model Python environment **without `--nv`** and clears GPU visibility. Omit `--dependencies-only` to also check the cached weights, instantiate both real offline processors, tokenize the official PUP system prompt, and verify its stop tokens and context budget. This catches optional image/video processor dependencies before GPU allocation, even for text-only generation. The scheduler runs this CPU preflight before creating a new daily claim, so missing weights or incompatible imports cannot spend a GPU allocation. A passed preflight is explicitly labeled `gpu_inference: not_tested`. Run the first real full-model validation in a normal authorized daily slot; it shares the 30-minute budget and cannot trigger a retry after any GPU allocation.
 
 **Fallback model.** In a separate GPU virtual environment, first install a CUDA-enabled PyTorch build compatible with the target driver and GPU architecture, then run the commands below. Set `ART_BACKEND=diffusers` on the private scheduler and point `HPC_REMOTE_PYTHON` to the prepared remote environment.
 

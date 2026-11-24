@@ -1,6 +1,7 @@
 # CUDA 12.4 compatibility profile, separate from upstream's CUDA 13/vLLM stack.
 # Install torch first from https://download.pytorch.org/whl/cu124
 torch==2.6.0
+torchvision==0.21.0
 transformers==5.24.0
 accelerate==1.16.0
 safetensors==0.8.0
