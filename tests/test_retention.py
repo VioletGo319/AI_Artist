@@ -1,10 +1,13 @@
+from hashlib import sha256
+from io import BytesIO
 import json
+from PIL import Image
 from types import SimpleNamespace
 
 import pytest
 
 from artcurator.curator.publish import publish
-from artcurator.curator.retention import cleanup, inventory, remote_prune
+from artcurator.curator.retention import cleanup, inventory, pixel_digest, remote_prune
 from artcurator.mailer import service
 from artcurator.store import Busy
 
@@ -80,7 +83,7 @@ def test_public_integrity_is_still_enforced_after_private_pruning(mock_batch):
 
 def test_remote_inventory_and_lock_guard_idempotent_pruning(mock_batch):
     _, store, batch = mock_batch
-    receipt = dict(batch=batch["id"], items=inventory(store, batch["id"]))
+    receipt = worker_receipt(store, batch["id"])
     with store.lock("gpu-worker"), pytest.raises(Busy):
         remote_prune(store, receipt)
     with pytest.raises(ValueError, match="inventory mismatch"):
@@ -112,3 +115,43 @@ def test_active_schedule_prevents_pruning(mock_batch):
                    (batch["day"], batch["id"], "slurm", "queued"))
     result = cleanup(store, env, apply=True, mock=True, fetch=fetch)
     assert result["waiting"] and (store.root / "candidates" / batch["id"]).is_dir()
+
+
+def worker_receipt(store, batch):
+    item = store.artworks(batch)[0]
+    raw = (store.root / "candidates" / batch / item["image"]).read_bytes()
+    return dict(batch=batch, items=inventory(store, batch), approved=[item["id"]],
+                approved_pixels={item["id"]: pixel_digest(raw)})
+
+
+@pytest.mark.parametrize("changed_pixels", [False, True])
+def test_remote_pixel_proof_handles_png_reencoding_but_rejects_changed_art(mock_batch, changed_pixels):
+    _, store, batch = mock_batch
+    receipt = worker_receipt(store, batch["id"])
+    item = store.artworks(batch["id"])[0]
+    path = store.root / "candidates" / batch["id"] / item["image"]
+    original = path.read_bytes()
+    with Image.open(BytesIO(original)) as image:
+        if changed_pixels:
+            image.putpixel((0, 0), (255, 0, 255))
+        image.save(path, format="PNG", compress_level=0)
+    assert path.read_bytes() != original
+    with store.connect(write=True) as db:
+        db.execute("UPDATE works SET sha=? WHERE id=?", (sha256(path.read_bytes()).hexdigest(), item["id"]))
+    if changed_pixels:
+        with pytest.raises(ValueError, match="pixel/checksum mismatch"):
+            remote_prune(store, receipt)
+        assert path.is_file()
+    else:
+        assert remote_prune(store, receipt)["pruned"]
+
+
+def test_remote_prune_recovers_after_files_removed_before_completion_marker(mock_batch):
+    _, store, batch = mock_batch
+    receipt = worker_receipt(store, batch["id"])
+    remote_prune(store, receipt)
+    with store.connect(write=True) as db:
+        db.execute("UPDATE retention_events SET local_pruned=0 WHERE batch=?", (batch["id"],))
+    assert remote_prune(store, receipt)["removed_bytes"] == 0
+    with store.connect() as db:
+        assert db.execute("SELECT local_pruned FROM retention_events").fetchone()[0] == 1

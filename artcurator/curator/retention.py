@@ -4,12 +4,15 @@ Never removes SQLite rows, credentials, model weights, public originals, or a
 batch still awaiting approval. Remote pruning is a separate idempotent receipt.
 """
 from hashlib import sha256
+from io import BytesIO
 import json
 import re
 import shutil
 import subprocess
 from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
+
+from PIL import Image
 
 from artcurator.curator.publish import FIELDS, read_manifest
 from artcurator.generator.worker import get_plan
@@ -41,8 +44,19 @@ def inventory(store, batch):
         row = db.execute("SELECT state FROM batches WHERE id=?", (batch,)).fetchone()
         if not row or row["state"] not in {"ready", "partial"}:
             raise ValueError("Cleanup requires a completed batch.")
-        return {row["id"]: row["sha"] for row in db.execute(
-            "SELECT id,sha FROM works WHERE batch=? ORDER BY slot", (batch,))}
+        # The importer decodes and re-encodes PNGs, so file hashes can differ
+        # across Pillow versions. Compare the full immutable metadata inventory;
+        # approved images additionally require exact decoded pixel hashes below.
+        return {row["id"]: sha256(json.dumps(
+            {key: json.loads(row["data"])[key] for key in FIELDS},
+            sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode()).hexdigest()
+            for row in db.execute("SELECT id,data FROM works WHERE batch=? ORDER BY slot", (batch,))}
+
+
+def pixel_digest(raw):
+    with Image.open(BytesIO(raw), formats=["PNG"]) as image:
+        rgb = image.convert("RGB")
+        return sha256(f"RGB:{rgb.width}:{rgb.height}:".encode() + rgb.tobytes()).hexdigest()
 
 
 def prune_files(store, batch):
@@ -75,6 +89,27 @@ def remote_prune(store, receipt):
         healthy(store)
         if not receipt.get("items") or inventory(store, batch) != receipt["items"]:
             raise ValueError("Remote cleanup inventory mismatch.")
+        approved = receipt.get("approved_pixels", {})
+        if not approved or set(approved) != set(receipt.get("approved", [])) or not set(approved) <= set(receipt["items"]):
+            raise ValueError("Remote cleanup requires verified approved pixels.")
+        with store.connect() as db:
+            event = db.execute("SELECT * FROM retention_events WHERE batch=?", (batch,)).fetchone()
+            rows = db.execute("SELECT id,data,sha FROM works WHERE batch=?", (batch,)).fetchall()
+        folder = store.root / "candidates" / batch
+        if event and (event["local_pruned"] or not folder.exists()):
+            if json.loads(event["receipt"]).get("approved_pixels") != approved:
+                raise ValueError("Remote cleanup receipt changed.")
+            with store.connect(write=True) as db:
+                db.execute("UPDATE retention_events SET local_pruned=1,updated=? WHERE batch=?", (utcnow(), batch))
+            return dict(batch=batch, removed_bytes=0, pruned=True)
+        for row in rows:
+            if row["id"] in approved:
+                path = store.root / "candidates" / batch / json.loads(row["data"])["image"]
+                if path.is_symlink():
+                    raise ValueError("Remote original is a symbolic link.")
+                raw = path.read_bytes()
+                if sha256(raw).hexdigest() != row["sha"] or pixel_digest(raw) != approved[row["id"]]:
+                    raise ValueError("Remote approved pixel/checksum mismatch.")
         with store.connect(write=True) as db:
             db.execute("INSERT OR IGNORE INTO retention_events(batch,receipt,updated) VALUES (?,?,?)",
                        (batch, json.dumps(receipt), utcnow()))
@@ -124,6 +159,7 @@ def cleanup(store, env, *, apply=False, mock=False, fetch=download, client=None)
                 report["waiting"].append(dict(batch=identity, reason="not closed or still active"))
                 continue
             try:
+                approved_pixels = {}
                 for row in approved:
                     item = json.loads(row["data"])
                     expected = {**{key: item[key] for key in FIELDS}, "approved_at": row["chosen_at"],
@@ -139,16 +175,20 @@ def cleanup(store, env, *, apply=False, mock=False, fetch=download, client=None)
                         raw = path.read_bytes()
                         if kind == "image" and sha256(raw).hexdigest() != row["sha"]:
                             raise ValueError("published original checksum mismatch")
+                        if kind == "image":
+                            approved_pixels[row["id"]] = pixel_digest(raw)
                         online = fetch(base + expected[kind], len(raw))
                         if not raw or sha256(online).digest() != sha256(raw).digest():
                             raise ValueError("deployed asset checksum mismatch")
                 receipt = dict(batch=identity, items=inventory(store, identity),
-                               approved=[row["id"] for row in approved], site=base, verified_at=utcnow())
+                               approved=[row["id"] for row in approved], approved_pixels=approved_pixels,
+                               site=base, verified_at=utcnow())
                 if not apply:
                     report["batches"].append(dict(batch=identity, action="eligible"))
                     continue
                 with store.connect(write=True) as db:
-                    db.execute("INSERT OR IGNORE INTO retention_events(batch,receipt,updated) VALUES (?,?,?)",
+                    db.execute("""INSERT INTO retention_events(batch,receipt,updated) VALUES (?,?,?)
+                        ON CONFLICT(batch) DO UPDATE SET receipt=excluded.receipt,updated=excluded.updated""",
                                (identity, json.dumps(receipt), utcnow()))
                 if not event or not event["local_pruned"]:
                     report["removed_bytes"] += prune_files(store, identity)
