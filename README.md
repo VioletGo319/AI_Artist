@@ -46,7 +46,7 @@ Sending, approval processing, and publication are idempotent. CLI commands repor
 
 The original target is an authorized HPC A100 40GB. Prepare Linux, Python 3.12, and a PyTorch/CUDA environment compatible with the cluster's driver using an administrator-approved method. The commands below install dependencies and cache weights; they do not request a GPU or start inference. Clear the mock demo's `ART_*` environment overrides before configuring production.
 
-**Check driver compatibility first.** The FLUX installation below follows the official CUDA 13 package source. For Caviness driver `550.54.15`, use the validated CUDA 12.4 Z-Image-Turbo setup described in the next section instead.
+**Check driver compatibility first.** The upstream installation below uses CUDA 13 and vLLM. Do not run it in the existing Caviness driver `550.54.15` environment. That host uses the separate CUDA 12.4 compatibility profile below; Z-Image-Turbo remains an explicitly selectable, previously validated model, not an automatic substitute for FLUX.
 
 ```bash
 # Never copy the private scheduler's .env file to the HPC cluster.
@@ -69,7 +69,41 @@ The official repository describes a combined model footprint of approximately 52
 
 FLUX defaults to 16-step distilled inference, native BF16, no CFG, and 1024×1024 output. Configure `generation.aspect_ratios` to use `1:1`, `16:9` (1280×720), `3:2` (1248×832), or `9:16` (720×1280).
 
-The official vLLM Upsampler runs in a separate stage and saves each expanded prompt. After that process exits, the default inference path moves the official text encoder, DiT, and VAE onto the GPU separately, using the official sampling and decoding functions to reduce simultaneous GPU residency. The A100 path does not enable FP8 or NVFP4. Dependency compatibility and peak GPU memory must still be verified inside an authorized A100 allocation. [BFL memory and staged-inference guidance](https://github.com/black-forest-labs/flux-3-image-klein#smaller-gpus)
+The Upsampler runs in a separate process and saves each expanded prompt. After that process exits, the inference path moves the official text encoder, DiT, and VAE onto the GPU separately, using the official sampling and decoding functions to reduce simultaneous GPU residency. The A100 path does not enable FP8 or NVFP4. Peak GPU memory and full inference still require an authorized A100 test. [BFL memory and staged-inference guidance](https://github.com/black-forest-labs/flux-3-image-klein#smaller-gpus)
+
+### FLUX on the Caviness CUDA 12.4 stack
+
+The current quality-first target is **FLUX 3 Klein, BF16, 16 steps, official Prompt Upsampler weights**. `generation.upsampler_backend: transformers` runs BFL's `flux-3-image-klein-pup` Qwen3.5 model with its unmodified `t2i` system prompt through a Transformers adapter. It is **not the upstream vLLM runtime** and is not claimed to produce numerically identical captions. It keeps greedy decoding, the 3584-token output limit, thinking disabled, and a generated-token presence penalty. There is no raw-prompt or substitute-model fallback on PUP failure. Set `upsampler_backend: vllm` only on a separately prepared compatible upstream environment.
+
+The compatibility profile uses Python 3.12, PyTorch 2.6.0+cu124, Transformers 5.24.0, Accelerate 1.16.0 and Safetensors 0.8.0. Keep the official source pinned to `bfc8889a4497f846416f253a3972a1941ac698b9` on `PYTHONPATH`; do not install its CUDA 13 dependency set into this profile. `requirements-flux-compat.txt` records the dependency versions. CPU-only imports, an official FLUX attention primitive, and tiny random-weight Qwen3.5 generation have passed in the Caviness container. This does **not** validate the full PUP weights, GPU memory, full-model speed, or A100 inference. Without optional optimized Qwen kernels, Transformers uses slower reference implementations; measure actual throughput before adding compiled kernels.
+
+On the configured host, `config/hpc-flux-python.sh` adds `work/flux3-bfc8889/src` to `PYTHONPATH` and reuses the existing `.venv-zimage` dependencies without modifying them. The name of that base environment does not select the image model. `HPC_GPU_PYTHON` in the HPC-only runtime file points to this overlay; `HPC_CONTROL_PYTHON` remains separate. To reproduce the source overlay, clone the official repository into `work/flux3-bfc8889` and check out the pinned revision above, then run the CPU preflight. On a new host, prepare the CUDA 12.4 dependency environment from `requirements-flux-compat.txt` first.
+
+Accept access terms on the [official FLUX model page](https://huggingface.co/black-forest-labs/flux-3-image-klein), create a read-only Hugging Face token with permission for that model, then run on the **private device** (never paste the token into chat):
+
+```bash
+# Use a private Python environment with huggingface_hub installed.
+export HF_HOME="$PWD/private/huggingface"
+hf auth login
+python config/download-flux.py --check-access
+python config/download-flux.py --weights weights
+rsync -av --exclude='.cache/' weights/flux-3-image-klein weights/pup \
+  caviness-curator:/work/weiqian_stat/users/xwyu/ai-art-curator/weights/
+```
+
+The download helper pins both model revisions and reuses cached files. Transfer only the two weight directories, never `.env`, OAuth files or the Hugging Face token cache. Approximate upstream combined download size is 52 GB. The model and PUP are not yet cached on the current HPC host.
+
+If the private device lacks 52 GB of free space, use the streaming alternative **instead of** `download-flux.py --weights` and `rsync`:
+
+```bash
+export HF_HOME="$PWD/private/huggingface"
+python config/stream-flux.py --host caviness-curator \
+  --remote-root /work/weiqian_stat/users/xwyu/ai-art-curator/weights
+```
+
+It authenticates to Hugging Face locally and streams bounded chunks over SSH; no long-lived token is sent to HPC. Remote files are checked against the pinned Hub size and SHA-256 (LFS) or Git blob hash before atomic rename. Interrupted `.part` files resume with HTTP Range. Cached complete files are verified and skipped. This step consumes network/storage, not a GPU allocation. Ensure sufficient **remote** quota before starting.
+
+`config/hpc-python.sh --model-check -m artcurator model-check --dependencies-only` loads the model Python environment **without `--nv`** and clears GPU visibility. Omit `--dependencies-only` to also check the cached weights and official PUP system prompt. The scheduler runs this CPU preflight before creating a new daily claim, so missing weights or incompatible imports cannot spend a GPU allocation. A passed preflight is explicitly labeled `gpu_inference: not_tested`. Run the first real full-model validation in a normal authorized daily slot; it shares the 30-minute budget and cannot trigger a retry after any GPU allocation.
 
 **Fallback model.** In a separate GPU virtual environment, first install a CUDA-enabled PyTorch build compatible with the target driver and GPU architecture, then run the commands below. Set `ART_BACKEND=diffusers` on the private scheduler and point `HPC_REMOTE_PYTHON` to the prepared remote environment.
 
@@ -173,11 +207,11 @@ The filesystem storage adapter writes immutable PNG originals and WebP thumbnail
 
 ## Curation and preference learning
 
-The prompt library contains 15 themes, including original **Game Worlds**, **Storm Canyon**, and **Spring Snow, Warm Sun**. The configured `vivid_fantasy` direction favors these three themes, jewel-like palettes, warm sunlight, dramatic skies, and detailed environments while retaining 30% exploration. Scene, palette, composition, and seed variations keep larger batches diverse. The `balanced` direction preserves the original quieter art library. Previous theme/palette pairs are avoided where possible; large batches may revisit a pair with a different scene, composition, and seed. SQLite records artwork IDs, prompts, seeds, resolutions, models, and other metadata. SHA-256/dHash deduplication and basic quality checks remain enabled; human approval determines publication.
+The configured `ethereal` direction is a compositional brief across all 15 themes: one visual anchor, generous negative space, sparse atmospheric depth, delicate light, and concentrated color accents. Game worlds, storm canyons, and spring snow are examples, not preferred subject categories. The official PUP is asked to preserve the empty space and scale relationships rather than invent extra ornament. Aspect ratios rotate through 3:2, 16:9, 1:1 and 9:16. The previous `vivid_fantasy` and `balanced` directions remain available. The preference engine retains 30% exploration. Previous theme/palette pairs are avoided where possible; larger batches revisit them with different compositions and seeds. SQLite stores original briefs, expanded captions, model, PUP runtime, seeds, resolutions and other metadata. Deduplication and basic quality checks remain enabled; human approval determines publication.
 
 Scheduled generation now uses `generation.mode: time_budget`: it continues beyond eight candidates until the remaining allocation is too short for another image. The 30-minute Slurm limit includes container startup and model loading. A rolling estimate of recent attempt durations reserves at least 60 seconds for saving and shutdown; variable inference time or preemption may still interrupt the final attempt, but completed PNGs are retained. There is a configurable defensive ceiling of 256 candidates, not a target or guaranteed yield. Resolution and inference steps are unchanged. No GPU is held idle just to fill the clock. Use `mode: count` to return to fixed batches; explicit `generate --count 8` remains a bounded local/mock command.
 
-Large batches transfer from HPC in pages of eight originals, so a transfer failure cannot expose an incomplete gallery to the mailer. All saved candidates appear in one email using bounded JPEG previews; originals remain private until approval. Replies support two- and three-digit numbers (for example `05,19；100`). Publication and browser favorites accept IDs through 256. A budget-limited batch can have `partial` status because unused planned slots remain; this is expected and its saved candidates are eligible for curation after retrieval finishes. FLUX expands prompts in small isolated GPU phases; the currently configured and previously validated HPC model remains cached Z-Image-Turbo. Tests of the new budget behavior use simulated clocks and images, not a new real GPU run.
+Large batches transfer from HPC in pages of eight originals, so a transfer failure cannot expose an incomplete gallery to the mailer. All saved candidates appear in one email using bounded JPEG previews; originals remain private until approval. Replies support two- and three-digit numbers (for example `05,19；100`). Publication and browser favorites accept IDs through 256. A budget-limited batch can have `partial` status because unused planned slots remain; this is expected and its saved candidates are eligible for curation after retrieval finishes. FLUX expands prompts in small isolated GPU phases. The November 23 Z-Image-Turbo batch produced 154 candidates in 29 minutes and was retrieved and emailed; this is not a FLUX benchmark or a future output target. Quality settings are not reduced to match that yield.
 
 The preference engine uses recent approvals and exposures to weight themes, palettes, compositions, and styles, with a small boost for keywords in approved prompts. Approval snapshots also record the model, seed, and selection time. Model selection remains configuration-driven. The default exploration rate is 30%.
 

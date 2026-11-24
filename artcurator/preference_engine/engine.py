@@ -1,6 +1,7 @@
 from collections import Counter
 from random import Random
 import re
+from artcurator.preference_engine import ethereal
 
 THEMES = {
     "Surrealism": ("A tide rising inside a porcelain room", "The Room Keeps the Tide", "surrealist still life"),
@@ -90,7 +91,8 @@ def inspiration(seed, count, previous, approvals, exploration, exposures=(), *, 
                    if (value := row.get(key)))
     recent_keywords = Counter(word for row in approvals for word in row.get("keywords", ()))
     previous_pairs = {(slot["theme"], slot["palette"]) for slot in previous}
-    palettes = VIVID_PALETTES if direction == "vivid_fantasy" else PALETTES
+    palettes = (ethereal.PALETTES if direction == "ethereal" else
+                VIVID_PALETTES if direction == "vivid_fantasy" else PALETTES)
     all_pairs = [(theme, palette) for theme in THEMES for palette in palettes]
     combinations = [(theme, palette) for theme, palette in all_pairs
                     if (theme, palette) not in previous_pairs]
@@ -119,14 +121,18 @@ def inspiration(seed, count, previous, approvals, exploration, exposures=(), *, 
         subject, title, style = THEMES[theme]
         if direction == "vivid_fantasy" and theme in FANTASY_SCENES:
             subject, title = rng.choice(FANTASY_SCENES[theme])
-        composition = choose(rng, COMPOSITIONS, lambda item: weight(likes, seen, "composition", item), exploration)
+        compositions = ethereal.COMPOSITIONS if direction == "ethereal" else COMPOSITIONS
+        composition = choose(rng, compositions, lambda item: weight(likes, seen, "composition", item), exploration)
         detail = rng.choice(VIVID_DETAILS if direction == "vivid_fantasy" else DETAILS)
         if direction == "vivid_fantasy":
             detail += ", vibrant but coherent colors, preserved highlight detail, no text, no interface, no watermark"
+        prompt = f"{subject}. {style.capitalize()} using {palette}, {composition}, {detail}."
+        if direction == "ethereal":
+            subject, title, style, prompt = ethereal.describe(theme, palette, composition, rng)
         if any(item["title"] == title for item in items):
             title += f" — {len(items) + 1:02d}"
         items.append(dict(theme=theme, palette=palette, composition=composition, style=style, title=title,
-                          prompt=f"{subject}. {style.capitalize()} using {palette}, {composition}, {detail}."))
+                          prompt=prompt))
     return items
 
 

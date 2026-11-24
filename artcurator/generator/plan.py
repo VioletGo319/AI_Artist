@@ -1,6 +1,7 @@
 from datetime import date
 import json
 from random import Random
+from typing import Literal
 import uuid
 
 from pydantic import Field
@@ -34,6 +35,7 @@ class Plan(Strict):
     guidance: float | None
     cpu_offload: bool
     upsampler_memory: float = Field(ge=.6, le=.95)
+    upsampler_backend: Literal["vllm", "transformers"] = "vllm"
     duplicate_distance: int = Field(ge=0, le=12)
     aesthetic_score: bool
     time_budget: bool = False
@@ -77,6 +79,7 @@ def make_plan(store, env, day, count, route):
             slots.append(Slot(**idea, width=width, height=height, seeds=seeds[i * ATTEMPTS:(i + 1) * ATTEMPTS]))
         plan = Plan(id=identity.hex, day=day, backend=generation.backend, model=model, steps=steps,
                     guidance=guidance, cpu_offload=generation.cpu_offload, upsampler_memory=generation.upsampler_memory,
+                    upsampler_backend=generation.upsampler_backend,
                     duplicate_distance=generation.duplicate_distance, aesthetic_score=generation.aesthetic_score,
                     time_budget=generation.mode == "time_budget", cleanup_seconds=generation.cleanup_seconds, slots=slots)
         save_plan(db, plan, route)

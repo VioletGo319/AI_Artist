@@ -71,6 +71,10 @@ def check_cache(env, plan):
 
 
 def make_upsampler(env, plan):
+    if plan.upsampler_backend == "transformers":
+        from artcurator.generator.upsampler import TransformersUpsampler
+
+        return TransformersUpsampler(env.weights / "pup")
     from flux3.pup import Upsampler
 
     model = Upsampler(str(env.weights / "pup"), plan.upsampler_memory)

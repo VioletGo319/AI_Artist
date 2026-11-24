@@ -26,7 +26,8 @@ class Generation(Strict):
     count: int = Field(8, ge=1, le=MAX_CANDIDATES)
     mode: Literal["count", "time_budget"] = "count"
     max_candidates: int = Field(MAX_CANDIDATES, ge=1, le=MAX_CANDIDATES)
-    creative_direction: Literal["balanced", "vivid_fantasy"] = "balanced"
+    creative_direction: Literal["balanced", "vivid_fantasy", "ethereal"] = "balanced"
+    upsampler_backend: Literal["vllm", "transformers"] = "vllm"
     cleanup_seconds: int = Field(60, ge=60, le=180)
     aspect_ratios: list[Literal["1:1", "16:9", "3:2", "9:16"]] = Field(default_factory=lambda: ["1:1"], min_length=1)
     cpu_offload: bool = True

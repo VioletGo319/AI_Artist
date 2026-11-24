@@ -148,6 +148,8 @@ def start_fallback(store, env, now, day, end, client, previous):
     receipt = client.unallocated_receipt(plan, previous["job"])
     if receipt is None:
         return "skipped: accounting does not prove the first job was never allocated"
+    if plan.backend == "flux3":
+        client.preflight()
     with store.connect(write=True) as db:
         inserted = db.execute("""INSERT OR IGNORE INTO schedule_fallbacks
             (day,batch,first_job,first_schedule,accounting,deadline,created)
@@ -171,6 +173,10 @@ def start_slurm(store, env, now, day, end, client, count, resume_day=None):
             return "waiting: prior Slurm attempt is being reconciled"
     if previous:
         return start_fallback(store, env, now, day, end, client, previous)
+    if env.settings.generation.backend == "flux3":
+        # Fail before making a daily claim or spending an allocation. This is a
+        # CPU-only dependency/cache check, not proof of A100 compatibility.
+        client.preflight()
     wait = env.settings.scheduler.admission_minutes
     minutes_left = int((end - now).total_seconds() // 60)
     runtime = min(env.settings.scheduler.runtime_minutes, minutes_left - wait)

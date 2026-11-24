@@ -41,6 +41,17 @@ def test_control_container_never_enables_gpu(container_adapter):
     assert args[-4:] == ["/control/bin/python", "-m", "artcurator", "status"]
 
 
+def test_model_check_uses_model_environment_without_gpu(container_adapter):
+    wrapper, env = container_adapter
+    env.update(SLURM_JOB_ID="123", CUDA_VISIBLE_DEVICES="2")
+    result = subprocess.run(["bash", str(wrapper), "--model-check", "-m", "artcurator", "model-check"],
+                            env=env, capture_output=True, text=True, check=True)
+    args = json.loads(result.stdout)
+    assert "--nv" not in args and "CUDA_VISIBLE_DEVICES=" in args
+    assert "SLURM_JOB_ID=123" not in args
+    assert args[-4:] == ["/gpu/bin/python", "-m", "artcurator", "model-check"]
+
+
 def test_gpu_container_preserves_slurm_assignment(container_adapter):
     wrapper, env = container_adapter
     env.update(SLURM_JOB_ID="123", CUDA_VISIBLE_DEVICES="2", ART_ALLOCATION_START="1795438800")

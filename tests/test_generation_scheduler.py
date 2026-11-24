@@ -120,6 +120,11 @@ class FakeSlurm:
         self.jobs = []
         self.canceled = []
         self.accept = False
+        self.preflight_calls = 0
+
+    def preflight(self):
+        self.preflight_calls += 1
+        return {"dependencies": "passed", "cache": "passed", "gpu_inference": "not_tested"}
 
     def stage(self, plan):
         stage_request(self.remote, plan.model_dump_json().encode())

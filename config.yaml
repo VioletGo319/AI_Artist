@@ -5,9 +5,11 @@ generation:
   # Scheduled jobs continue until the time budget, not until eight images.
   mode: time_budget
   max_candidates: 256  # Defensive ceiling; the 30-minute time limit normally wins.
-  creative_direction: vivid_fantasy
+  creative_direction: ethereal
+  # Official PUP weights/system prompt; CUDA 12 compatibility runner, not vLLM.
+  upsampler_backend: transformers
   cleanup_seconds: 60
-  aspect_ratios: ["1:1"]
+  aspect_ratios: ["3:2", "16:9", "1:1", "9:16"]
   cpu_offload: true
   upsampler_memory: 0.86
   duplicate_distance: 3

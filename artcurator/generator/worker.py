@@ -231,6 +231,9 @@ def persist_candidate(store, plan, index, seed, prompt, image, checkpoint, gener
                       seed=seed, width=slot.width, height=slot.height, steps=plan.steps, model=plan.model,
                       date=plan.day.isoformat(), generated_at=generated_at or utcnow(), image=checkpoint.name,
                       thumb=f"{identity}.webp", mock=plan.backend == "mock")
+        if plan.backend == "flux3":
+            record["upsampler"] = "black-forest-labs/flux-3-image-klein-pup"
+            record["upsampler_runtime"] = plan.upsampler_backend
         if plan.aesthetic_score:
             record["aesthetic"] = round(min(1, contrast / 65) * .6 + (1 - abs(brightness - 127.5) / 127.5) * .4, 3)
         db.execute("INSERT INTO works(id,batch,slot,data,sha,phash) VALUES (?,?,?,?,?,?)",

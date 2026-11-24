@@ -51,6 +51,8 @@ def arguments(argv):
     commands.add_parser("gmail-status", help="Check OAuth setup without sending mail.").add_argument(
         "--connect", action="store_true", help="Verify the OAuth mailbox with a read-only profile request.")
     commands.add_parser("hpc-stage")
+    commands.add_parser("model-check", help="CPU-only FLUX dependency/cache preflight; no GPU allocation.").add_argument(
+        "--dependencies-only", action="store_true")
     sub = commands.add_parser("hpc-export")
     sub.add_argument("--batch", required=True)
     sub.add_argument("--after", type=int, default=0)
@@ -187,6 +189,9 @@ def main(argv=None):
             if len(payload) > 2_000_000:
                 raise ValueError("Oversized Slurm plan.")
             print(stage_request(store, payload).id)
+        elif command == "model-check":
+            from artcurator.generator.preflight import check
+            print(json.dumps(check(env, dependencies_only=args.dependencies_only), indent=2))
         elif command == "hpc-export":
             sys.stdout.buffer.write(export_request(store, args.batch, args.after, args.limit))
         elif command == "_expand":

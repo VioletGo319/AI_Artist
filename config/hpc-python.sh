@@ -34,8 +34,19 @@ if [[ "$HPC_APPTAINER" != /* || ! -x "$HPC_APPTAINER" ]]; then
     printf 'HPC_APPTAINER must be an absolute executable path.\n' >&2
     exit 2
 fi
+model_check=false
+if [[ "${1:-}" == --model-check ]]; then
+    model_check=true
+    shift
+fi
 options=(exec --cleanenv --no-home --pid --ipc --bind "$curator_root:$curator_root" --pwd "$curator_root")
-if [[ -n "${SLURM_JOB_ID:-}" ]]; then
+if $model_check; then
+    : "${HPC_GPU_IMAGE:?Configure the model container}"
+    : "${HPC_GPU_PYTHON:?Configure the model Python}"
+    image="$HPC_GPU_IMAGE"
+    python="$HPC_GPU_PYTHON"
+    options+=(--env CUDA_VISIBLE_DEVICES=)
+elif [[ -n "${SLURM_JOB_ID:-}" ]]; then
     : "${CUDA_VISIBLE_DEVICES:?The Slurm job must allocate a GPU}"
     : "${HPC_GPU_IMAGE:?Configure and validate the GPU container first}"
     : "${HPC_GPU_PYTHON:?Set Python inside the GPU container}"

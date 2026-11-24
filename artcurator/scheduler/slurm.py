@@ -65,8 +65,8 @@ class Slurm:
                 "-o", "ServerAliveInterval=10", "-o", "ServerAliveCountMax=2", "-o", "StrictHostKeyChecking=yes",
                 self.host or "APPROVED_HOST", remote]
 
-    def ssh(self, command, data=None):
-        return subprocess.run(self.ssh_command(command), input=data, capture_output=True, timeout=55)
+    def ssh(self, command, data=None, timeout=55):
+        return subprocess.run(self.ssh_command(command), input=data, capture_output=True, timeout=timeout)
 
     def worker(self, action, *args, data=None):
         return self.ssh(["env", f"ART_STATE_DIR={self.root}/private", self.python, "-m", "artcurator", action, *args],
@@ -74,6 +74,15 @@ class Slurm:
 
     def stage(self, plan):
         checked(self.worker("hpc-stage", data=plan.model_dump_json().encode()), "stage")
+
+    def preflight(self):
+        result = self.ssh([self.python, "--model-check", "-m", "artcurator", "model-check"], timeout=180)
+        report = json.loads(checked(result, "FLUX preflight"))
+        if (report.get("dependencies") != "passed" or report.get("cache") != "passed"
+                or report.get("model") != "black-forest-labs/flux-3-image-klein"
+                or report.get("upsampler") != self.env.settings.generation.upsampler_backend):
+            raise RuntimeError("FLUX model environment/cache is not ready; no GPU submitted.")
+        return report
 
     def submit(self, plan, deadline, runtime, scheduled_day):
         result = self.ssh(self.arguments(plan, deadline, runtime, scheduled_day))
