@@ -10,7 +10,7 @@ const fields = ['id', 'title', 'theme', 'palette', 'composition', 'style', 'prom
 if (manifest.version !== 1 || !Array.isArray(manifest.artworks)) throw Error('Invalid gallery format')
 for (const entry of manifest.artworks) {
   if (!fields.every((key) => Object.hasOwn(entry, key))
-      || !/^[a-f0-9]{32}-(0[1-9]|1[0-6])$/.test(entry.id)
+      || !/^[a-f0-9]{32}-(0[1-9]|[1-9][0-9]|1[0-9]{2}|2[0-4][0-9]|25[0-6])$/.test(entry.id)
       || !/^\d{4}-\d{2}-\d{2}$/.test(entry.date)
       || Number.isNaN(Date.parse(entry.approved_at)) || typeof entry.model !== 'string'
       || entry.mock || entry.model.startsWith('mock/') || images.has(entry.image)

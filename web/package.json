@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build && node scripts/check-gallery.mjs dist",
+    "build": "node --test scripts/check-gallery.test.mjs && tsc --noEmit && vite build && node scripts/check-gallery.mjs dist",
     "preview": "vite preview",
     "test:e2e": "bash ../config/e2e.sh"
   },
