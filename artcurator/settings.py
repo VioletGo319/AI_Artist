@@ -77,6 +77,12 @@ class GitPublish(Strict):
     branch: str = Field("main", pattern=r"^[a-zA-Z0-9][a-zA-Z0-9_./-]*$")
 
 
+class Retention(Strict):
+    enabled: bool = False
+    site_url: str = ""
+    remote: bool = True
+
+
 class Settings(Strict):
     timezone: str = "America/New_York"
     generation: Generation = Field(default_factory=Generation)
@@ -84,6 +90,7 @@ class Settings(Strict):
     scheduler: Schedule = Field(default_factory=Schedule)
     mail: Mail = Field(default_factory=Mail)
     publish: GitPublish = Field(default_factory=GitPublish)
+    retention: Retention = Field(default_factory=Retention)
 
 
 class Environment:

@@ -42,6 +42,21 @@ python -m artcurator status
 
 Sending, approval processing, and publication are idempotent. CLI commands report empty, skipped, partial, or failed outcomes. Ordinary errors return exit code 1; the scheduler records unavailable GPUs as a normal skip.
 
+## Automatic storage cleanup
+
+After a batch has a valid email approval and its selected originals and thumbnails are live on the public website, the private controller removes that batch's private candidate files, expanded-prompt files, and email preview. It also prunes the matching HPC candidate directory. Unselected images in that closed batch are deleted as well; make the complete selection in the first approval reply. Batches still awaiting approval are preserved.
+
+Cleanup checks SQLite integrity, the local and deployed manifests, and the SHA-256 checksums of every selected original and thumbnail before removing anything. An audit receipt supports safe retries if SSH fails halfway through. The public museum files, SQLite approval/preference history, daily submission records, credentials, and active model weights remain intact. Publication can reuse checksum-verified public originals after private duplicates have been removed.
+
+`retention.enabled` in `config.yaml` enables cleanup at the end of successful controller ticks. Set `retention.site_url` to the deployed website URL. If GitHub Pages is still deploying, cleanup waits until a later tick can verify the live assets. The manual command defaults to a dry run:
+
+```bash
+python -m artcurator cleanup --dry-run
+python -m artcurator cleanup --apply
+```
+
+On November 24, the obsolete Z-Image-Turbo weight directory was removed from the configured HPC project, reclaiming approximately 24.3 GiB. The active FLUX/PUP weights remain cached to avoid downloading them each day. Keep `.venv-zimage`: despite its historical name, it is the active CUDA 12.4 environment used by the FLUX wrapper. Build outputs and test caches are disposable; do not delete runtime environments or database files as part of daily cleanup.
+
 ## HPC A100 model environment
 
 The original target is an authorized HPC A100 40GB. Prepare Linux, Python 3.12, and a PyTorch/CUDA environment compatible with the cluster's driver using an administrator-approved method. The commands below install dependencies and cache weights; they do not request a GPU or start inference. Clear the mock demo's `ART_*` environment overrides before configuring production.

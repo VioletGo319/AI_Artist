@@ -39,3 +39,7 @@ mail:
 publish:
   remote: origin
   branch: main
+retention:
+  enabled: true
+  site_url: https://xinyuwang.net/AI_Artist/
+  remote: true

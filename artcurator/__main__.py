@@ -40,6 +40,11 @@ def arguments(argv):
     sub.add_argument("--approved-only", action="store_true", required=True)
     sub.add_argument("--mock", action="store_true")
     sub.add_argument("--push", action="store_true")
+    sub = commands.add_parser("cleanup", help="Prune closed-batch duplicates after checking deployed assets.")
+    cleanup_mode = sub.add_mutually_exclusive_group()
+    cleanup_mode.add_argument("--apply", action="store_true")
+    cleanup_mode.add_argument("--dry-run", action="store_true")
+    sub.add_argument("--mock", action="store_true")
     sub = commands.add_parser("scheduler")
     options = sub.add_mutually_exclusive_group()
     options.add_argument("--dry-run", action="store_true")
@@ -51,6 +56,7 @@ def arguments(argv):
     commands.add_parser("gmail-status", help="Check OAuth setup without sending mail.").add_argument(
         "--connect", action="store_true", help="Verify the OAuth mailbox with a read-only profile request.")
     commands.add_parser("hpc-stage")
+    commands.add_parser("hpc-prune")
     commands.add_parser("model-check", help="CPU-only FLUX dependency/cache preflight; no GPU allocation.").add_argument(
         "--dependencies-only", action="store_true")
     sub = commands.add_parser("hpc-export")
@@ -121,6 +127,12 @@ def tick(store, env, now, mock):
         print("Published / Git:", *publish(store, env, mock, not mock and env.flag("GIT_PUSH_ENABLED")))
     except (RuntimeError, ValueError, OSError, subprocess.SubprocessError) as error:
         errors.append(f"publication: {error}")
+    if not errors and not mock and env.settings.retention.enabled:
+        from artcurator.curator.retention import cleanup
+        try:
+            print("Cleanup:", json.dumps(cleanup(store, env, apply=True)))
+        except (RuntimeError, ValueError, OSError, subprocess.SubprocessError) as error:
+            errors.append(f"cleanup: {error}")
     if errors:
         raise RuntimeError("\n".join(errors))
 
@@ -177,6 +189,9 @@ def main(argv=None):
             print("Valid replies / approvals:", *mail.check(store, env, args.mock))
         elif command == "publish":
             print("Published / Git:", *publish(store, env, args.mock, args.push))
+        elif command == "cleanup":
+            from artcurator.curator.retention import cleanup
+            print(json.dumps(cleanup(store, env, apply=args.apply, mock=args.mock), indent=2))
         elif command == "scheduler":
             result = schedule(store, env, now, resume_day=args.resume.isoformat() if args.resume else None)
             print(result)
@@ -189,6 +204,12 @@ def main(argv=None):
             if len(payload) > 2_000_000:
                 raise ValueError("Oversized Slurm plan.")
             print(stage_request(store, payload).id)
+        elif command == "hpc-prune":
+            from artcurator.curator.retention import remote_prune
+            payload = sys.stdin.buffer.read(2_000_001)
+            if len(payload) > 2_000_000:
+                raise ValueError("Oversized cleanup receipt.")
+            print(json.dumps(remote_prune(store, json.loads(payload))))
         elif command == "model-check":
             from artcurator.generator.preflight import check
             print(json.dumps(check(env, dependencies_only=args.dependencies_only), indent=2))

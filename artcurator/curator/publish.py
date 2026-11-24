@@ -39,7 +39,7 @@ class FilesystemGallery:
 
 
 def read_manifest(path):
-    value = json.loads(path.read_text()) if path.exists() else {"version": 1, "artworks": []}
+    value = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {"version": 1, "artworks": []}
     if not isinstance(value, dict) or value.get("version") != 1 or not isinstance(value.get("artworks"), list):
         raise ValueError("Invalid public gallery manifest.")
     indexed = {}
@@ -93,6 +93,12 @@ def publish(store, env, mock=False, push=False):
             if item["mock"] and not mock:
                 continue
             source = store.root / "candidates" / row["batch"] / item["image"]
+            # Closed, deployed batches may have had their private duplicates pruned.
+            # The immutable approved public original remains verified against SQLite.
+            if not source.exists() and identity in indexed:
+                source = gallery / "art" / f"{identity}.png"
+            if source.is_symlink():
+                raise ValueError("Approved originals cannot be symbolic links.")
             raw = source.read_bytes()
             if sha256(raw).hexdigest() != row["sha"]:
                 raise ValueError(f"Approved original failed integrity check: {identity}.")

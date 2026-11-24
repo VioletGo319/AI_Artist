@@ -39,6 +39,11 @@ CREATE TABLE IF NOT EXISTS approvals (
   work TEXT PRIMARY KEY REFERENCES works(id), reply TEXT NOT NULL REFERENCES replies(id),
   chosen_at TEXT NOT NULL, snapshot TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS retention_events (
+  batch TEXT PRIMARY KEY REFERENCES batches(id), receipt TEXT NOT NULL,
+  local_pruned INTEGER NOT NULL DEFAULT 0, remote_pruned INTEGER NOT NULL DEFAULT 0,
+  updated TEXT NOT NULL
+);
 """
 
 
